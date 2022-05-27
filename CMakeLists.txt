@@ -22,6 +22,9 @@ if(NOT TARGET OpenMP::OpenMP_CXX)
     message(INFO "[CT_ICP] Could not find OpenMP")
 endif()
 
+find_package(lgmath)
+find_package(steam)
+
 add_subdirectory(src)
 target_compile_definitions(CT_ICP PUBLIC CT_ICP_CPP_STANDARD=${CMAKE_CXX_STANDARD})
 

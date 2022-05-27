@@ -26,7 +26,8 @@ USER 0:0
 
 ## Dependencies
 RUN apt update && apt upgrade -q -y
-RUN apt update && apt install -q -y cmake git build-essential
+RUN apt update && apt install -q -y cmake git build-essential lsb-release curl gnupg2
+RUN apt update && apt install -q -y libboost-all-dev libomp-dev
 RUN apt update && apt install -q -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
 RUN apt update && apt install -q -y freeglut3-dev
 RUN apt update && apt install -q -y python3 python3-distutils python3-pip
