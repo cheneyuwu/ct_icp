@@ -1,4 +1,4 @@
-max_num_threads:  1
+max_num_threads: 1
 save_trajectory: true
 suspend_on_failure: false
 output_dir: .outputs
@@ -51,7 +51,7 @@ odometry_options:
     solver: GN # Options: [GN=Gauss-Newton, CERES]
     loss_function: HUBER # Options: [STANDARD, CAUCHY, HUBER, TOLERANT, TRUNCATED] (for CERES solver)
     ls_max_num_iters: 1 # The number of steps performed for each iteration of the ICP (for CERES solver)
-    ls_num_threads:  16 # The number of threads to build and solve the least square system (for CERES solver)
+    ls_num_threads: 16 # The number of threads to build and solve the least square system (for CERES solver)
     ls_sigma: 0.1 # The sigma parameter for loss CAUCHY, HUBER, TOLERANT, TRUNCATED (for CERES solver)
     ls_tolerant_min_threshold: 0.05 # The tolerant parameter for loss TOLERANT (for CERES solver)
 
