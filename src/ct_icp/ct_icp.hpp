@@ -168,6 +168,10 @@ namespace ct_icp {
                          const VoxelHashMap &voxels_map, std::vector<Point3D> &keypoints,
                          std::vector<TrajectoryFrame> &trajectory, int index_frame);
 
+    ICPSummary CT_ICP_STEAM(const CTICPOptions &options,
+                            const VoxelHashMap &voxels_map, std::vector<Point3D> &keypoints,
+                            std::vector<TrajectoryFrame> &trajectory, int index_frame);                         
+
 } // namespace Elastic_ICP
 
 

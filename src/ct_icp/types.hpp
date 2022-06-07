@@ -11,6 +11,8 @@
 #include <Eigen/StdVector>
 #include <glog/logging.h>
 
+#include <steam.hpp>
+
 #include "utils.hpp"
 
 #define _USE_MATH_DEFINES
@@ -50,6 +52,8 @@ namespace ct_icp {
         Eigen::Vector3d begin_t;
         Eigen::Matrix3d end_R;
         Eigen::Vector3d end_t;
+
+        steam::traj::const_vel::Interface::Ptr steam_traj;
 
         inline double EgoAngularDistance() const {
             return AngularDistance(begin_R, end_R);
