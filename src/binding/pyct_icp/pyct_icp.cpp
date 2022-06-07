@@ -148,6 +148,7 @@ PYBIND11_MODULE(pyct_icp, m) {
     py::enum_<ct_icp::CT_ICP_SOLVER>(m, "CT_ICP_SOLVER")
             ADD_VALUE(ct_icp::CT_ICP_SOLVER, CERES)
             ADD_VALUE(ct_icp::CT_ICP_SOLVER, GN)
+            ADD_VALUE(ct_icp::CT_ICP_SOLVER, STEAM)
             .export_values();
 
     py::class_<ct_icp::SequenceInfo>(m, "SequenceInfo")

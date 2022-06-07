@@ -8,6 +8,8 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 option(WITH_VIZ3D "Search and install viz3d (disabled by default)" OFF)
 option(WITH_PYTHON_BINDING "Install Python bindings" OFF)
 
+add_compile_options(-march=native -O3)  # needed by steam and lgmath
+
 if (NOT RUNTIME_DESTINATION)
     set(RUNTIME_DESTINATION ${CMAKE_CURRENT_SOURCE_DIR})
 endif()

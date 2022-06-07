@@ -31,7 +31,8 @@ namespace ct_icp {
 
     enum CT_ICP_SOLVER {
         GN,
-        CERES
+        CERES,
+        STEAM
     };
 
     enum LEAST_SQUARES {
@@ -170,7 +171,7 @@ namespace ct_icp {
 
     ICPSummary CT_ICP_STEAM(const CTICPOptions &options,
                             const VoxelHashMap &voxels_map, std::vector<Point3D> &keypoints,
-                            std::vector<TrajectoryFrame> &trajectory, int index_frame);                         
+                            std::vector<TrajectoryFrame> &trajectory, int index_frame);
 
 } // namespace Elastic_ICP
 

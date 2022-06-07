@@ -340,8 +340,19 @@ namespace ct_icp {
         if (kDisplay) {
             log_out << "/* ------------------------------------------------------------------------ */" << std::endl;
             log_out << "/* ------------------------------------------------------------------------ */" << std::endl;
-            log_out << "REGISTRATION OF FRAME number " << index_frame <<
-                    " with " << (options_.ct_icp_options.solver == CERES ? "CERES" : "GN") << " solver" << std::endl;
+            std::string solver;
+            switch (options_.ct_icp_options.solver) {
+                case CERES:
+                    solver = "CERES";
+                    break;
+                case GN:
+                    solver = "GN";
+                    break;
+                case STEAM:
+                    solver = "STEAM";
+                    break;
+            }
+            log_out << "REGISTRATION OF FRAME number " << index_frame << " with " << solver << " solver" << std::endl;
         }
 
         auto frame = InitializeFrame(const_frame, index_frame);
@@ -593,11 +604,9 @@ namespace ct_icp {
             //CT ICP
             ICPSummary icp_summary;
             if (options_.ct_icp_options.solver == CT_ICP_SOLVER::GN) {
-                auto keypoints_tmp = keypoints;
-                auto frame_tmp = trajectory_[index_frame];
-                (void)CT_ICP_STEAM(options, voxel_map_, keypoints_tmp, trajectory_, index_frame);
-                trajectory_[index_frame] = frame_tmp;
                 icp_summary = CT_ICP_GN(options, voxel_map_, keypoints, trajectory_, index_frame);
+            } else if (options_.ct_icp_options.solver == CT_ICP_SOLVER::STEAM) {
+                icp_summary = CT_ICP_STEAM(options, voxel_map_, keypoints, trajectory_, index_frame);
             } else {
                 icp_summary = CT_ICP_CERES(options, voxel_map_, keypoints, trajectory_, index_frame);
             }

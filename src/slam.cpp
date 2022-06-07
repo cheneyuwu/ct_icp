@@ -270,11 +270,13 @@ SLAMOptions read_config(const std::string &config_path) {
 
                 if (icp_node["solver"]) {
                     auto solver = icp_node["solver"].as<std::string>();
-                    CHECK(solver == "GN" || solver == "CERES");
+                    CHECK(solver == "GN" || solver == "CERES" || solver == "STEAM");
                     if (solver == "GN")
                         icp_options.solver = GN;
-                    else
+                    else if (solver == "CERES")
                         icp_options.solver = CERES;
+                    else
+                        icp_options.solver = STEAM;
                 }
 
                 if (icp_node["loss_function"]) {

@@ -7,6 +7,8 @@
 #include <ceres/ceres.h>
 #include <glog/logging.h>
 
+#include <steam.hpp>
+
 #include "ct_icp.hpp"
 #include "cost_functions.h"
 
@@ -1003,21 +1005,71 @@ namespace ct_icp {
     ICPSummary CT_ICP_STEAM(const CTICPOptions &options,
                             const VoxelHashMap &voxels_map, std::vector<Point3D> &keypoints,
                             std::vector<TrajectoryFrame> &trajectory, int index_frame) {
+#if true
+        std::cout << "[CT_ICP_STEAM] begin_timestamp: " << trajectory[index_frame].begin_timestamp << std::endl;
+        std::cout << "[CT_ICP_STEAM] end_timestamp: " << trajectory[index_frame].end_timestamp << std::endl;
 
+        using namespace steam;
+        using namespace steam::se3;
+        using namespace steam::traj;
+        using namespace steam::vspace;
+
+        // prev trajectory for initialization of velocity
+        // first state
+        Time begin_time(static_cast<double>(trajectory[index_frame].begin_timestamp));
+        Eigen::Matrix4d begin_T_mr = Eigen::Matrix4d::Identity();
+        begin_T_mr.block(0, 0, 3, 3) = trajectory[index_frame].begin_R;
+        begin_T_mr.block(0, 3, 3, 1) = trajectory[index_frame].begin_t;
+        Eigen::Matrix<double, 6, 1> begin_W_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
+        // last state
+        Time end_time(static_cast<double>(trajectory[index_frame].end_timestamp));
+        Eigen::Matrix4d end_T_mr = Eigen::Matrix4d::Identity();
+        end_T_mr.block(0, 0, 3, 3) = trajectory[index_frame].end_R;
+        end_T_mr.block(0, 3, 3, 1) = trajectory[index_frame].end_t;
+        Eigen::Matrix<double, 6, 1> end_W_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
+
+        // use previous trajectory to initialize velocity
+        auto prev_steam_trajectory = trajectory[index_frame - 1].steam_traj;
+        if (prev_steam_trajectory != nullptr) {
+            begin_W_mr_inr = prev_steam_trajectory->getVelocityInterpolator(begin_time)->evaluate();
+            std::cout << "[CT_ICP_STEAM] initialize begin_W_mr_inr: " << begin_W_mr_inr.transpose() << std::endl;
+            end_W_mr_inr = prev_steam_trajectory->getVelocityInterpolator(end_time)->evaluate();
+            std::cout << "[CT_ICP_STEAM] initialize end_W_mr_inr: " << end_W_mr_inr.transpose() << std::endl;
+        }
+
+        // Convert initial and final pose to trajectory
+        Eigen::Matrix<double, 6, 6> steam_traj_qc_inv = Eigen::Matrix<double, 6, 6>::Zero(); /// \todo cticp parameter
+        steam_traj_qc_inv.diagonal() << 1.0, 0.1, 0.1, 0.1, 0.1, 1.0;
+        const auto steam_trajectory = const_vel::Interface::MakeShared(steam_traj_qc_inv, true);
+
+        std::vector<StateVarBase::Ptr> steam_state_vars;
+
+        auto begin_T_rm_var = SE3StateVar::MakeShared(lgmath::se3::Transformation(begin_T_mr).inverse());
+        auto begin_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(begin_W_mr_inr);
+        steam_trajectory->add(begin_time, begin_T_rm_var, begin_w_mr_inr_var);
+        steam_state_vars.emplace_back(begin_T_rm_var);
+        steam_state_vars.emplace_back(begin_w_mr_inr_var);
+
+        auto end_T_rm_var = SE3StateVar::MakeShared(lgmath::se3::Transformation(end_T_mr).inverse());
+        auto end_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(end_W_mr_inr);
+        steam_trajectory->add(end_time, end_T_rm_var, end_w_mr_inr_var);
+        steam_state_vars.emplace_back(end_T_rm_var);
+        steam_state_vars.emplace_back(end_w_mr_inr_var);
+#else
         //Optimization with Traj constraints
         double ALPHA_C = options.beta_location_consistency; // 0.001;
         double ALPHA_E = options.beta_constant_velocity; // 0.001; //no ego (0.0) is not working
-
+#endif
         // For the 50 first frames, visit 2 voxels
         const short nb_voxels_visited = index_frame < options.init_num_frames ? 2 : 1;
         int number_keypoints_used = 0;
         const int kMinNumNeighbors = options.min_number_neighbors;
-
+#if false
         using AType = Eigen::Matrix<double, 12, 12>;
         using bType = Eigen::Matrix<double, 12, 1>;
         AType A;
         bType b;
-
+#endif
         // TODO Remove chronos
         double elapsed_search_neighbors = 0.0;
         double elapsed_select_closest_neighbors = 0.0;
@@ -1030,13 +1082,29 @@ namespace ct_icp {
 
         int num_iter_icp = index_frame < options.init_num_frames ? 15 : options.num_iters_icp;
         for (int iter(0); iter < num_iter_icp; iter++) {
+#if false
             A = Eigen::MatrixXd::Zero(12, 12);
             b = Eigen::VectorXd::Zero(12);
-
+#endif
             number_keypoints_used = 0;
+#if false
             double total_scalar = 0;
             double mean_scalar = 0.0;
+#endif
+#if true
+            // initialize problem
+            OptimizationProblem problem(/* num_threads */ 8);
 
+            // add variables
+            for (const auto &var : steam_state_vars)
+                problem.addStateVariable(var);
+
+            // add prior cost terms
+            steam_trajectory->addPriorCostTerms(problem);
+
+            // shared loss function
+            auto loss_func = L2LossFunc::MakeShared();
+#endif
             for (auto &keypoint: keypoints) {
                 auto start = std::chrono::steady_clock::now();
                 auto &pt_keypoint = keypoint.pt;
@@ -1086,14 +1154,31 @@ namespace ct_icp {
 
                 if (fabs(dist_to_plane) < options.max_dist_to_plane_ct_icp) {
 
+#if false
                     double scalar = closest_pt_normal[0] * (pt_keypoint[0] - closest_point[0]) +
                                     closest_pt_normal[1] * (pt_keypoint[1] - closest_point[1]) +
                                     closest_pt_normal[2] * (pt_keypoint[2] - closest_point[2]);
                     total_scalar = total_scalar + scalar * scalar;
                     mean_scalar = mean_scalar + fabs(scalar);
+#endif
                     number_keypoints_used++;
+#if true
+                    Eigen::Matrix3d W = (closest_pt_normal * closest_pt_normal.transpose() + 1e-5 * Eigen::Matrix3d::Identity());
+                    auto noise_model = StaticNoiseModel<3>::MakeShared(W, NoiseType::INFORMATION);
 
+                    // query and reference point
+                    /// const auto qry_pt = keypoint.raw_pt;
+                    /// const auto ref_pt = closest_point;
 
+                    const auto qry_time = trajectory[index_frame].begin_timestamp + alpha_timestamp * (trajectory[index_frame].end_timestamp - trajectory[index_frame].begin_timestamp);
+                    const auto T_rm_intp_eval = steam_trajectory->getPoseInterpolator(Time(qry_time));
+                    const auto T_mr_intp_eval = inverse(T_rm_intp_eval);
+                    auto error_func = p2p::p2pError(T_mr_intp_eval, closest_point, keypoint.raw_pt);
+
+                    // create cost term and add to problem
+                    auto cost = WeightedLeastSqCostTerm<3>::MakeShared(error_func, noise_model, loss_func);
+                    problem.addCostTerm(cost);
+#else
                     Eigen::Vector3d frame_idx_previous_origin_begin =
                             trajectory[index_frame].begin_R * keypoint.raw_pt;
                     Eigen::Vector3d frame_idx_previous_origin_end =
@@ -1132,7 +1217,7 @@ namespace ct_icp {
                         }
                         b(i) = b(i) - u[i] * scalar;
                     }
-
+#endif
 
                     auto step4 = std::chrono::steady_clock::now();
                     std::chrono::duration<double> _elapsed_A = step4 - step3;
@@ -1156,7 +1241,7 @@ namespace ct_icp {
 
             auto start = std::chrono::steady_clock::now();
 
-
+#if false
             // Normalize equation
             for (int i(0); i < 12; i++) {
                 for (int j(0); j < 12; j++) {
@@ -1185,9 +1270,40 @@ namespace ct_icp {
                 b(10) = b(10) - ALPHA_E * diff_ego(1);
                 b(11) = b(11) - ALPHA_E * diff_ego(2);
             }
-
+#endif
 
             //Solve
+            using SolverType = VanillaGaussNewtonSolver;
+            SolverType::Params params;
+            params.verbose = false;
+            params.maxIterations = 5; /// \todo cticp parameter
+            SolverType solver(&problem, params);
+            try {
+                solver.optimize();
+            } catch (const decomp_failure &) {
+                std::cout << "Steam optimization failed! T_m_s left unchanged.";
+            }
+
+            //Update (changes trajectory data)
+            double diff_trans = 0, diff_rot = 0;
+
+            auto &current_estimate = trajectory[index_frame];
+
+            const auto begin_T_mr = inverse(steam_trajectory->getPoseInterpolator(begin_time))->evaluate().matrix();
+            diff_trans += (current_estimate.begin_t - begin_T_mr.block<3, 1>(0, 3)).norm();
+            diff_rot += AngularDistance(current_estimate.begin_R, begin_T_mr.block<3, 3>(0, 0));
+            current_estimate.begin_R = begin_T_mr.block<3, 3>(0, 0);
+            current_estimate.begin_t = begin_T_mr.block<3, 1>(0, 3);
+
+            const auto end_T_mr = inverse(steam_trajectory->getPoseInterpolator(end_time))->evaluate().matrix();
+            diff_trans += (current_estimate.end_t - end_T_mr.block<3, 1>(0, 3)).norm();
+            diff_rot += AngularDistance(current_estimate.end_R, end_T_mr.block<3, 3>(0, 0));
+            current_estimate.end_R = end_T_mr.block<3, 3>(0, 0);
+            current_estimate.end_t = end_T_mr.block<3, 1>(0, 3);
+
+            current_estimate.steam_traj = steam_trajectory;
+
+#if false
             Eigen::VectorXd x_bundle = A.ldlt().solve(b);
 
             double alpha_begin = x_bundle(0);
@@ -1228,13 +1344,23 @@ namespace ct_icp {
             trajectory[index_frame].begin_t = trajectory[index_frame].begin_t + translation_begin;
             trajectory[index_frame].end_R = rotation_end * trajectory[index_frame].end_R;
             trajectory[index_frame].end_t = trajectory[index_frame].end_t + translation_end;
-
+#endif
             auto solve_step = std::chrono::steady_clock::now();
             std::chrono::duration<double> _elapsed_solve = solve_step - start;
             elapsed_solve += _elapsed_solve.count() * 1000.0;
 
 
             //Update keypoints
+#if true
+            for (auto &keypoint: keypoints) {
+                const auto qry_time = trajectory[index_frame].begin_timestamp +
+                                      keypoint.alpha_timestamp * (trajectory[index_frame].end_timestamp - trajectory[index_frame].begin_timestamp);
+                const auto T_rm_intp_eval = steam_trajectory->getPoseInterpolator(Time(qry_time));
+                const auto T_mr_intp_eval = inverse(T_rm_intp_eval);
+                const auto T_mr = T_mr_intp_eval->evaluate().matrix();
+                keypoint.pt = T_mr.block<3, 3>(0, 0) * keypoint.raw_pt + T_mr.block<3, 1>(0, 3);
+            }
+#else
             for (auto &keypoint: keypoints) {
                 Eigen::Quaterniond q_begin = Eigen::Quaterniond(trajectory[index_frame].begin_R);
                 Eigen::Quaterniond q_end = Eigen::Quaterniond(trajectory[index_frame].end_R);
@@ -1247,17 +1373,31 @@ namespace ct_icp {
                 Eigen::Vector3d t = (1.0 - alpha_timestamp) * t_begin + alpha_timestamp * t_end;
                 keypoint.pt = R * keypoint.raw_pt + t;
             }
+#endif
             auto update_step = std::chrono::steady_clock::now();
             std::chrono::duration<double> _elapsed_update = update_step - solve_step;
             elapsed_update += _elapsed_update.count() * 1000.0;
 
+#if true
+            if ((index_frame > 1) && (diff_rot < options.threshold_orientation_norm &&
+                                      diff_trans < options.threshold_translation_norm)) {
+                summary.success = true;
+                summary.num_residuals_used = number_keypoints_used;
 
+                if (options.debug_print) {
+                    std::cout << "CT_ICP: Finished with N=" << iter << " ICP iterations" << std::endl;
+                }
+
+                return summary;
+            }
+#else
             if ((index_frame > 1) && (x_bundle.norm() < options.threshold_orientation_norm)) {
                 summary.success = true;
                 summary.num_residuals_used = number_keypoints_used;
 
                 return summary;
             }
+#endif
         }
 
         if (options.debug_print) {
