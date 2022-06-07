@@ -1005,7 +1005,6 @@ namespace ct_icp {
     ICPSummary CT_ICP_STEAM(const CTICPOptions &options,
                             const VoxelHashMap &voxels_map, std::vector<Point3D> &keypoints,
                             std::vector<TrajectoryFrame> &trajectory, int index_frame) {
-#if true
         std::cout << "[CT_ICP_STEAM] begin_timestamp: " << trajectory[index_frame].begin_timestamp << std::endl;
         std::cout << "[CT_ICP_STEAM] end_timestamp: " << trajectory[index_frame].end_timestamp << std::endl;
 
@@ -1055,21 +1054,12 @@ namespace ct_icp {
         steam_trajectory->add(end_time, end_T_rm_var, end_w_mr_inr_var);
         steam_state_vars.emplace_back(end_T_rm_var);
         steam_state_vars.emplace_back(end_w_mr_inr_var);
-#else
-        //Optimization with Traj constraints
-        double ALPHA_C = options.beta_location_consistency; // 0.001;
-        double ALPHA_E = options.beta_constant_velocity; // 0.001; //no ego (0.0) is not working
-#endif
+
         // For the 50 first frames, visit 2 voxels
         const short nb_voxels_visited = index_frame < options.init_num_frames ? 2 : 1;
         int number_keypoints_used = 0;
         const int kMinNumNeighbors = options.min_number_neighbors;
-#if false
-        using AType = Eigen::Matrix<double, 12, 12>;
-        using bType = Eigen::Matrix<double, 12, 1>;
-        AType A;
-        bType b;
-#endif
+
         // TODO Remove chronos
         double elapsed_search_neighbors = 0.0;
         double elapsed_select_closest_neighbors = 0.0;
@@ -1082,16 +1072,9 @@ namespace ct_icp {
 
         int num_iter_icp = index_frame < options.init_num_frames ? 15 : options.num_iters_icp;
         for (int iter(0); iter < num_iter_icp; iter++) {
-#if false
-            A = Eigen::MatrixXd::Zero(12, 12);
-            b = Eigen::VectorXd::Zero(12);
-#endif
+
             number_keypoints_used = 0;
-#if false
-            double total_scalar = 0;
-            double mean_scalar = 0.0;
-#endif
-#if true
+
             // initialize problem
             OptimizationProblem problem(/* num_threads */ 8);
 
@@ -1104,7 +1087,7 @@ namespace ct_icp {
 
             // shared loss function
             auto loss_func = L2LossFunc::MakeShared();
-#endif
+
             for (auto &keypoint: keypoints) {
                 auto start = std::chrono::steady_clock::now();
                 auto &pt_keypoint = keypoint.pt;
@@ -1154,15 +1137,8 @@ namespace ct_icp {
 
                 if (fabs(dist_to_plane) < options.max_dist_to_plane_ct_icp) {
 
-#if false
-                    double scalar = closest_pt_normal[0] * (pt_keypoint[0] - closest_point[0]) +
-                                    closest_pt_normal[1] * (pt_keypoint[1] - closest_point[1]) +
-                                    closest_pt_normal[2] * (pt_keypoint[2] - closest_point[2]);
-                    total_scalar = total_scalar + scalar * scalar;
-                    mean_scalar = mean_scalar + fabs(scalar);
-#endif
                     number_keypoints_used++;
-#if true
+
                     Eigen::Matrix3d W = (closest_pt_normal * closest_pt_normal.transpose() + 1e-5 * Eigen::Matrix3d::Identity());
                     auto noise_model = StaticNoiseModel<3>::MakeShared(W, NoiseType::INFORMATION);
 
@@ -1178,46 +1154,6 @@ namespace ct_icp {
                     // create cost term and add to problem
                     auto cost = WeightedLeastSqCostTerm<3>::MakeShared(error_func, noise_model, loss_func);
                     problem.addCostTerm(cost);
-#else
-                    Eigen::Vector3d frame_idx_previous_origin_begin =
-                            trajectory[index_frame].begin_R * keypoint.raw_pt;
-                    Eigen::Vector3d frame_idx_previous_origin_end =
-                            trajectory[index_frame].end_R * keypoint.raw_pt;
-
-                    double cbx =
-                            (1 - alpha_timestamp) * (frame_idx_previous_origin_begin[1] * closest_pt_normal[2] -
-                                                     frame_idx_previous_origin_begin[2] * closest_pt_normal[1]);
-                    double cby =
-                            (1 - alpha_timestamp) * (frame_idx_previous_origin_begin[2] * closest_pt_normal[0] -
-                                                     frame_idx_previous_origin_begin[0] * closest_pt_normal[2]);
-                    double cbz =
-                            (1 - alpha_timestamp) * (frame_idx_previous_origin_begin[0] * closest_pt_normal[1] -
-                                                     frame_idx_previous_origin_begin[1] * closest_pt_normal[0]);
-
-                    double nbx = (1 - alpha_timestamp) * closest_pt_normal[0];
-                    double nby = (1 - alpha_timestamp) * closest_pt_normal[1];
-                    double nbz = (1 - alpha_timestamp) * closest_pt_normal[2];
-
-                    double cex = (alpha_timestamp) * (frame_idx_previous_origin_end[1] * closest_pt_normal[2] -
-                                                      frame_idx_previous_origin_end[2] * closest_pt_normal[1]);
-                    double cey = (alpha_timestamp) * (frame_idx_previous_origin_end[2] * closest_pt_normal[0] -
-                                                      frame_idx_previous_origin_end[0] * closest_pt_normal[2]);
-                    double cez = (alpha_timestamp) * (frame_idx_previous_origin_end[0] * closest_pt_normal[1] -
-                                                      frame_idx_previous_origin_end[1] * closest_pt_normal[0]);
-
-                    double nex = (alpha_timestamp) * closest_pt_normal[0];
-                    double ney = (alpha_timestamp) * closest_pt_normal[1];
-                    double nez = (alpha_timestamp) * closest_pt_normal[2];
-
-                    Eigen::VectorXd u(12);
-                    u << cbx, cby, cbz, nbx, nby, nbz, cex, cey, cez, nex, ney, nez;
-                    for (int i = 0; i < 12; i++) {
-                        for (int j = 0; j < 12; j++) {
-                            A(i, j) = A(i, j) + u[i] * u[j];
-                        }
-                        b(i) = b(i) - u[i] * scalar;
-                    }
-#endif
 
                     auto step4 = std::chrono::steady_clock::now();
                     std::chrono::duration<double> _elapsed_A = step4 - step3;
@@ -1241,37 +1177,6 @@ namespace ct_icp {
 
             auto start = std::chrono::steady_clock::now();
 
-#if false
-            // Normalize equation
-            for (int i(0); i < 12; i++) {
-                for (int j(0); j < 12; j++) {
-                    A(i, j) = A(i, j) / number_keypoints_used;
-                }
-                b(i) = b(i) / number_keypoints_used;
-            }
-
-            //Add constraints in trajectory
-            if (index_frame > 1) //no constraints for frame_index == 1
-            {
-                Eigen::Vector3d diff_traj = trajectory[index_frame].begin_t - trajectory[index_frame - 1].end_t;
-                A(3, 3) = A(3, 3) + ALPHA_C;
-                A(4, 4) = A(4, 4) + ALPHA_C;
-                A(5, 5) = A(5, 5) + ALPHA_C;
-                b(3) = b(3) - ALPHA_C * diff_traj(0);
-                b(4) = b(4) - ALPHA_C * diff_traj(1);
-                b(5) = b(5) - ALPHA_C * diff_traj(2);
-
-                Eigen::Vector3d diff_ego = trajectory[index_frame].end_t - trajectory[index_frame].begin_t -
-                                           trajectory[index_frame - 1].end_t + trajectory[index_frame - 1].begin_t;
-                A(9, 9) = A(9, 9) + ALPHA_E;
-                A(10, 10) = A(10, 10) + ALPHA_E;
-                A(11, 11) = A(11, 11) + ALPHA_E;
-                b(9) = b(9) - ALPHA_E * diff_ego(0);
-                b(10) = b(10) - ALPHA_E * diff_ego(1);
-                b(11) = b(11) - ALPHA_E * diff_ego(2);
-            }
-#endif
-
             //Solve
             using SolverType = VanillaGaussNewtonSolver;
             SolverType::Params params;
@@ -1281,7 +1186,7 @@ namespace ct_icp {
             try {
                 solver.optimize();
             } catch (const decomp_failure &) {
-                std::cout << "Steam optimization failed! T_m_s left unchanged.";
+                std::cout << "Steam optimization failed! T_m_s left unchanged." << std::endl;
             }
 
             //Update (changes trajectory data)
@@ -1303,55 +1208,12 @@ namespace ct_icp {
 
             current_estimate.steam_traj = steam_trajectory;
 
-#if false
-            Eigen::VectorXd x_bundle = A.ldlt().solve(b);
-
-            double alpha_begin = x_bundle(0);
-            double beta_begin = x_bundle(1);
-            double gamma_begin = x_bundle(2);
-            Eigen::Matrix3d rotation_begin;
-            rotation_begin(0, 0) = cos(gamma_begin) * cos(beta_begin);
-            rotation_begin(0, 1) =
-                    -sin(gamma_begin) * cos(alpha_begin) + cos(gamma_begin) * sin(beta_begin) * sin(alpha_begin);
-            rotation_begin(0, 2) =
-                    sin(gamma_begin) * sin(alpha_begin) + cos(gamma_begin) * sin(beta_begin) * cos(alpha_begin);
-            rotation_begin(1, 0) = sin(gamma_begin) * cos(beta_begin);
-            rotation_begin(1, 1) =
-                    cos(gamma_begin) * cos(alpha_begin) + sin(gamma_begin) * sin(beta_begin) * sin(alpha_begin);
-            rotation_begin(1, 2) =
-                    -cos(gamma_begin) * sin(alpha_begin) + sin(gamma_begin) * sin(beta_begin) * cos(alpha_begin);
-            rotation_begin(2, 0) = -sin(beta_begin);
-            rotation_begin(2, 1) = cos(beta_begin) * sin(alpha_begin);
-            rotation_begin(2, 2) = cos(beta_begin) * cos(alpha_begin);
-            Eigen::Vector3d translation_begin = Eigen::Vector3d(x_bundle(3), x_bundle(4), x_bundle(5));
-
-            double alpha_end = x_bundle(6);
-            double beta_end = x_bundle(7);
-            double gamma_end = x_bundle(8);
-            Eigen::Matrix3d rotation_end;
-            rotation_end(0, 0) = cos(gamma_end) * cos(beta_end);
-            rotation_end(0, 1) = -sin(gamma_end) * cos(alpha_end) + cos(gamma_end) * sin(beta_end) * sin(alpha_end);
-            rotation_end(0, 2) = sin(gamma_end) * sin(alpha_end) + cos(gamma_end) * sin(beta_end) * cos(alpha_end);
-            rotation_end(1, 0) = sin(gamma_end) * cos(beta_end);
-            rotation_end(1, 1) = cos(gamma_end) * cos(alpha_end) + sin(gamma_end) * sin(beta_end) * sin(alpha_end);
-            rotation_end(1, 2) = -cos(gamma_end) * sin(alpha_end) + sin(gamma_end) * sin(beta_end) * cos(alpha_end);
-            rotation_end(2, 0) = -sin(beta_end);
-            rotation_end(2, 1) = cos(beta_end) * sin(alpha_end);
-            rotation_end(2, 2) = cos(beta_end) * cos(alpha_end);
-            Eigen::Vector3d translation_end = Eigen::Vector3d(x_bundle(9), x_bundle(10), x_bundle(11));
-
-            trajectory[index_frame].begin_R = rotation_begin * trajectory[index_frame].begin_R;
-            trajectory[index_frame].begin_t = trajectory[index_frame].begin_t + translation_begin;
-            trajectory[index_frame].end_R = rotation_end * trajectory[index_frame].end_R;
-            trajectory[index_frame].end_t = trajectory[index_frame].end_t + translation_end;
-#endif
             auto solve_step = std::chrono::steady_clock::now();
             std::chrono::duration<double> _elapsed_solve = solve_step - start;
             elapsed_solve += _elapsed_solve.count() * 1000.0;
 
 
             //Update keypoints
-#if true
             for (auto &keypoint: keypoints) {
                 const auto qry_time = trajectory[index_frame].begin_timestamp +
                                       keypoint.alpha_timestamp * (trajectory[index_frame].end_timestamp - trajectory[index_frame].begin_timestamp);
@@ -1360,25 +1222,11 @@ namespace ct_icp {
                 const auto T_mr = T_mr_intp_eval->evaluate().matrix();
                 keypoint.pt = T_mr.block<3, 3>(0, 0) * keypoint.raw_pt + T_mr.block<3, 1>(0, 3);
             }
-#else
-            for (auto &keypoint: keypoints) {
-                Eigen::Quaterniond q_begin = Eigen::Quaterniond(trajectory[index_frame].begin_R);
-                Eigen::Quaterniond q_end = Eigen::Quaterniond(trajectory[index_frame].end_R);
-                Eigen::Vector3d t_begin = trajectory[index_frame].begin_t;
-                Eigen::Vector3d t_end = trajectory[index_frame].end_t;
-                double alpha_timestamp = keypoint.alpha_timestamp;
-                Eigen::Quaterniond q = q_begin.slerp(alpha_timestamp, q_end);
-                q.normalize();
-                Eigen::Matrix3d R = q.toRotationMatrix();
-                Eigen::Vector3d t = (1.0 - alpha_timestamp) * t_begin + alpha_timestamp * t_end;
-                keypoint.pt = R * keypoint.raw_pt + t;
-            }
-#endif
+
             auto update_step = std::chrono::steady_clock::now();
             std::chrono::duration<double> _elapsed_update = update_step - solve_step;
             elapsed_update += _elapsed_update.count() * 1000.0;
 
-#if true
             if ((index_frame > 1) && (diff_rot < options.threshold_orientation_norm &&
                                       diff_trans < options.threshold_translation_norm)) {
                 summary.success = true;
@@ -1390,14 +1238,6 @@ namespace ct_icp {
 
                 return summary;
             }
-#else
-            if ((index_frame > 1) && (x_bundle.norm() < options.threshold_orientation_norm)) {
-                summary.success = true;
-                summary.num_residuals_used = number_keypoints_used;
-
-                return summary;
-            }
-#endif
         }
 
         if (options.debug_print) {
