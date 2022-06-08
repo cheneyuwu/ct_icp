@@ -1,7 +1,11 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
+find_dependency(glog)
+find_dependency(Ceres)
+find_dependency(tsl-robin-map)
 find_dependency(Eigen3 3.3.7)
+find_package(OpenMP REQUIRED)
 find_dependency(lgmath 1.1.0)
 find_dependency(steam 1.1.0)
 

@@ -81,7 +81,7 @@ cmake -G "$GENERATOR" -S $STEAM_SRC_DIR \
 	-DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
 	-DUSE_AMENT=OFF \
 	-DEigen3_DIR=${EXT_BUILD_DIR}/install/${BUILD_TYPE}/Eigen3/share/eigen3/cmake \
-	-Dlgmath_DIR=${LGMATH_BUILD_DIR} \
+	-Dlgmath_DIR=${LGMATH_BUILD_DIR}/install/${BUILD_TYPE}/lib/cmake/lgmath \
 	-DCMAKE_INSTALL_PREFIX=${STEAM_BUILD_DIR}/install/${BUILD_TYPE}
 check_status_code $?
 
@@ -96,12 +96,22 @@ cmake -G "$GENERATOR" -S $CT_ICP_SRC_DIR \
 	-DWITH_VIZ3D=$WITH_VIZ \
  	-DWITH_PYTHON_BINDING=${WITH_PYTHON_BINDING} \
 	-DEigen3_DIR=${EXT_BUILD_DIR}/install/${BUILD_TYPE}/Eigen3/share/eigen3/cmake \
-	-Dlgmath_DIR=${LGMATH_BUILD_DIR} \
-	-Dsteam_DIR=${STEAM_BUILD_DIR} \
+	-Dlgmath_DIR=${LGMATH_BUILD_DIR}/install/${BUILD_TYPE}/lib/cmake/lgmath \
+	-Dsteam_DIR=${STEAM_BUILD_DIR}/install/${BUILD_TYPE}/lib/cmake/steam \
 	-DCMAKE_INSTALL_PREFIX=${CT_ICP_BUILD_DIR}/install/${BUILD_TYPE}
 check_status_code $?
 
 echo "[CT_ICP] -- [CT_ICP] -- building CMake Project"
 cmake --build . --config $BUILD_TYPE --target install --parallel 6
 check_status_code $?
+
+echo "[CT_ICP] -- [CT_ICP_SLAM] -- building ros2 package"
+cd ${SRC_DIR}/ros2
+colcon build --symlink-install \
+	--event-handlers console_direct+ \
+	--cmake-args \
+		-DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+  	-Dlgmath_DIR=${LGMATH_BUILD_DIR}/install/${BUILD_TYPE}/lib/cmake/lgmath \
+  	-Dsteam_DIR=${STEAM_BUILD_DIR}/install/${BUILD_TYPE}/lib/cmake/steam \
+		-Dct_icp_DIR=${CT_ICP_BUILD_DIR}/install/${BUILD_TYPE}/lib/cmake/ct_icp
 
