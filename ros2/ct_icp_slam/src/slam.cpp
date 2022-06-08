@@ -159,6 +159,8 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       dataset_options.dataset = KITTI_360;
     else if (dataset == "NCLT")
       dataset_options.dataset = NCLT;
+    else if (dataset == "BOREAS")
+      dataset_options.dataset = BOREAS;
     else if (dataset == "PLY_DIRECTORY")
       dataset_options.dataset = PLY_DIRECTORY;
     else
@@ -492,7 +494,7 @@ int main(int argc, char **argv) {
         LOG(ERROR) << "Make sure output directory " << options.output_dir << " exists" << std::endl;
 
         if (options.suspend_on_failure) {
-          exit(1);
+          return 1;
         }
       }
     }

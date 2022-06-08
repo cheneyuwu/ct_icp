@@ -71,5 +71,6 @@ USER ${USERID}:${GROUPID}
 #   -v /tmp/.X11-unix:/tmp/.X11-unix \
 #   -v ${HOME}:${HOME}:rw \
 #   -v ${HOME}/ASRL:${HOME}/ASRL:rw \
+#   -v ${HOME}/ASRL/data/boreas/sequences:${HOME}/ASRL/data/BOREAS \
 #   -v /media/yuchen/T7/ASRL/data/KITTI_raw:${HOME}/ASRL/data/KITTI_raw \
 #   ct_icp

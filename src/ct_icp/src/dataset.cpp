@@ -107,19 +107,23 @@ namespace ct_icp {
     /// HARD CODED VALUES FOR BOREAS /// \todo fill in values
 
     const char *BOREAS_SEQUENCE_NAMES[] = {
-            "boreas-2022-xx-xx-xx-xx",
+            "boreas-2022-05-13-10-30",  // north dufferin sequence 2
     };
-
-    const int BOREAS_SEQUENCE_IDS[] = {0};
 
     const int NUMBER_SEQUENCES_BOREAS = 1;
 
-    // Calibration
-    const double T_Tr_data_BOREAS[] = { 1.0, 0.0, 0.0, 0.0,
-                                        0.0, 1.0, 0.0, 0.0,
-                                        0.0, 0.0, 1.0, 0.0,
-                                        0.0, 0.0, 0.0, 1.0 };
-
+    // Calibration  T_applanix_liar (re-calibrated)
+#if true
+    const double T_Tr_data_BOREAS[] = { 1.,  0.,  0.,  0.,
+                                        0.,  1.,  0.,  0.,
+                                        0.,  0.,  1.,  0.,
+                                        0.,  0.,  0.,  1. };
+#else
+    const double T_Tr_data_BOREAS[] = { 0.72225879, -0.69151961, -0.01195308,  0.        ,
+                                        0.69155896,  0.7223193 , -0.00117318,  0.        ,
+                                        0.00944496, -0.00741879,  0.99992795,  0.31601375,
+                                        0.        ,  0.        ,  0.        ,  1.          };
+#endif
     const Eigen::Matrix4d T_Tr_BOREAS(T_Tr_data_BOREAS);
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -142,7 +146,7 @@ namespace ct_icp {
                 folder_path += "frames/";
                 break;
             case BOREAS:
-                folder_path += "/lidar/";
+                folder_path += sequence_name + "/lidar/";
                 break;
             case NCLT:
                 throw std::runtime_error("Not Implemented!");
@@ -356,6 +360,8 @@ namespace ct_icp {
                 return KITTI_360_SEQUENCE_NAMES[sequence_id];
             case NCLT:
                 return NCLT_SEQUENCE_NAMES[sequence_id];
+            case BOREAS:
+                return BOREAS_SEQUENCE_NAMES[sequence_id];
             case PLY_DIRECTORY:
                 return "PLY_DIRECTORY";
         }
@@ -414,9 +420,10 @@ namespace ct_icp {
     }
 
     /* -------------------------------------------------------------------------------------------------------------- */
-    std::vector<Point3D> read_bin_pointcloud(const DatasetOptions &options, const std::string &path) {
+    std::vector<Point3D> read_boreas_pointcloud(const DatasetOptions &options, const std::string &path,
+                                                const double &time_delta_sec) {
         std::vector<Point3D> frame;
-        //read ply frame file
+        //read bin file
         std::ifstream ifs(path, std::ios::binary);
         std::vector<char> buffer(std::istreambuf_iterator<char>(ifs), {});
         unsigned float_offset = 4;
@@ -428,8 +435,8 @@ namespace ct_icp {
             return *((float *)(byteArray + index));
         };
 
-        double frame_last_timestamp = -1000000000.0;
-        double frame_first_timestamp = 1000000000.0;
+        double frame_last_timestamp = -1000000.0;
+        double frame_first_timestamp = 1000000.0;
         frame.reserve(numPointsIn);
         for (int i(0); i < numPointsIn; i++) {
             Point3D new_point;
@@ -465,8 +472,8 @@ namespace ct_icp {
         }
         frame.shrink_to_fit();
 
-        /// \todo fix timestamp
         for (int i(0); i < (int) frame.size(); i++) {
+            frame[i].timestamp = frame[i].alpha_timestamp + time_delta_sec;
             frame[i].alpha_timestamp = min(1.0, max(0.0, 1 - (frame_last_timestamp - frame[i].alpha_timestamp) /
                                                              (frame_last_timestamp - frame_first_timestamp))); //1.0
         }
@@ -800,12 +807,12 @@ namespace ct_icp {
     /* -------------------------------------------------------------------------------------------------------------- */
     ArrayPoses boreas_transform_trajectory_frame(const vector<TrajectoryFrame> &trajectory) {
         ArrayPoses poses;
-        Eigen::Matrix4d T_as = T_Tr_BOREAS;  // T_applanix_sensor
+        Eigen::Matrix4d T_al = T_Tr_BOREAS;  // T_applanix_lidar
 
         poses.reserve(trajectory.size());
         for (auto &frame: trajectory) {
             const auto T_s0_st = frame.MidPose();
-            poses.emplace_back(T_as * T_s0_st * T_as.inverse());
+            poses.emplace_back(T_al * T_s0_st * T_al.inverse());
         }
         return poses;
     }
@@ -1110,16 +1117,15 @@ namespace ct_icp {
     public:
         explicit BOREASIterator(const DatasetOptions &options, int sequence_id = -1) : options_(options),
                                                                                        sequence_id_(sequence_id) {
-            switch (options.dataset) {
-                case BOREAS:
-                    num_frames_ = CountNumFilesInDirectory(pointclouds_dir_path(options, options.root_path),
-                                                           &filenames_);
-                    std::sort(filenames_.begin(), filenames_.end());
-                    break;
-                default:
-                    num_frames_ = -1;
-                    break;
-            }
+            dir_path_ = pointclouds_dir_path(options_, BOREAS_SEQUENCE_NAMES[sequence_id_]);
+            auto dir_iter = std::filesystem::directory_iterator(dir_path_);
+            num_frames_ = std::count_if(begin(dir_iter), end(dir_iter),
+                    [this](auto &entry) {
+                        if (entry.is_regular_file()) filenames_.emplace_back(entry.path().filename().string());
+                        return entry.is_regular_file();
+                    });
+            std::sort(filenames_.begin(), filenames_.end());
+            initial_timestamp_micro_ = std::stoll(filenames_[0].substr(0, filenames_[0].find(".")));
         }
 
         ~BOREASIterator() = default;
@@ -1128,7 +1134,9 @@ namespace ct_icp {
             int frame_id = frame_id_++;
             std::vector<Point3D> pc;
             auto filename = filenames_[frame_id];
-            pc = read_bin_pointcloud(options_, filename);
+            int64_t time_delta_micro = std::stoll(filename.substr(0, filename.find("."))) - initial_timestamp_micro_;
+            double time_delta_sec = static_cast<double>(time_delta_micro) / 1e6;
+            pc = read_boreas_pointcloud(options_, dir_path_ + "/" + filename, time_delta_sec);
             return pc;
         }
 
@@ -1137,11 +1145,13 @@ namespace ct_icp {
         }
 
     private:
+        std::string dir_path_;
         std::vector<std::string> filenames_;
         DatasetOptions options_;
         int sequence_id_;
         int frame_id_ = 0;
         int num_frames_;
+        int64_t initial_timestamp_micro_;
     };
 
     /* -------------------------------------------------------------------------------------------------------------- */

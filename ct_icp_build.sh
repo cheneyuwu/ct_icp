@@ -108,7 +108,6 @@ check_status_code $?
 echo "[CT_ICP] -- [CT_ICP_SLAM] -- building ros2 package"
 cd ${SRC_DIR}/ros2
 colcon build --symlink-install \
-	--event-handlers console_direct+ \
 	--cmake-args \
 		-DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
   	-Dlgmath_DIR=${LGMATH_BUILD_DIR}/install/${BUILD_TYPE}/lib/cmake/lgmath \

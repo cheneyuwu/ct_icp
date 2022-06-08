@@ -21,7 +21,6 @@ find_package(tf2_ros REQUIRED)
 find_package(tf2_eigen REQUIRED)
 
 set(EXT_INSTALL_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake-build-${CMAKE_BUILD_TYPE}/external/install/${CMAKE_BUILD_TYPE})
-message("ct_icp_DIR is ${EXT_INSTALL_ROOT}")
 include(../../cmake/external.cmake)
 include(../../cmake/test.cmake)
 find_package(ct_icp REQUIRED)
