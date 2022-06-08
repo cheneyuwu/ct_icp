@@ -104,6 +104,25 @@ namespace ct_icp {
     const int NCLT_NUM_SEQUENCES = 27;
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /// HARD CODED VALUES FOR BOREAS /// \todo fill in values
+
+    const char *BOREAS_SEQUENCE_NAMES[] = {
+            "boreas-2022-xx-xx-xx-xx",
+    };
+
+    const int BOREAS_SEQUENCE_IDS[] = {0};
+
+    const int NUMBER_SEQUENCES_BOREAS = 1;
+
+    // Calibration
+    const double T_Tr_data_BOREAS[] = { 1.0, 0.0, 0.0, 0.0,
+                                        0.0, 1.0, 0.0, 0.0,
+                                        0.0, 0.0, 1.0, 0.0,
+                                        0.0, 0.0, 0.0, 1.0 };
+
+    const Eigen::Matrix4d T_Tr_BOREAS(T_Tr_data_BOREAS);
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
     // Returns the Path to the folder containing a sequence's point cloud Data
@@ -121,6 +140,9 @@ namespace ct_icp {
                 break;
             case PLY_DIRECTORY:
                 folder_path += "frames/";
+                break;
+            case BOREAS:
+                folder_path += "/lidar/";
                 break;
             case NCLT:
                 throw std::runtime_error("Not Implemented!");
@@ -216,6 +238,9 @@ namespace ct_icp {
             case NCLT:
                 num_sequences = 27;
                 break;
+            case BOREAS:
+                num_sequences = NUMBER_SEQUENCES_BOREAS;
+                break;
             case PLY_DIRECTORY:
                 num_sequences = 1;
                 break;
@@ -261,6 +286,11 @@ namespace ct_icp {
                     new_sequence_info.sequence_size = -1;
                     new_sequence_info.sequence_name =
                             std::string(NCLT_SEQUENCE_NAMES[new_sequence_info.sequence_id]) + "_vel";
+                    break;
+                case BOREAS:
+                    new_sequence_info.sequence_id = i;
+                    new_sequence_info.sequence_size = -1;
+                    new_sequence_info.sequence_name = BOREAS_SEQUENCE_NAMES[new_sequence_info.sequence_id];
                     break;
             }
 
@@ -379,6 +409,67 @@ namespace ct_icp {
                                                              (frame_last_timestamp - frame_first_timestamp))); //1.0
         }
         delete[] dataIn;
+
+        return frame;
+    }
+
+    /* -------------------------------------------------------------------------------------------------------------- */
+    std::vector<Point3D> read_bin_pointcloud(const DatasetOptions &options, const std::string &path) {
+        std::vector<Point3D> frame;
+        //read ply frame file
+        std::ifstream ifs(path, std::ios::binary);
+        std::vector<char> buffer(std::istreambuf_iterator<char>(ifs), {});
+        unsigned float_offset = 4;
+        unsigned fields = 6;  // x, y, z, i, r, t
+        unsigned point_step = float_offset * fields;
+        unsigned numPointsIn = std::floor(buffer.size() / point_step);
+
+        auto getFloatFromByteArray = [](char *byteArray, unsigned index) -> float {
+            return *((float *)(byteArray + index));
+        };
+
+        double frame_last_timestamp = -1000000000.0;
+        double frame_first_timestamp = 1000000000.0;
+        frame.reserve(numPointsIn);
+        for (int i(0); i < numPointsIn; i++) {
+            Point3D new_point;
+
+            int bufpos = i * point_step;
+            int offset = 0;
+            new_point.raw_pt[0] = getFloatFromByteArray(buffer.data(), bufpos + offset * float_offset);
+            ++offset;
+            new_point.raw_pt[1] = getFloatFromByteArray(buffer.data(), bufpos + offset * float_offset);
+            ++offset;
+            new_point.raw_pt[2] = getFloatFromByteArray(buffer.data(), bufpos + offset * float_offset);
+            new_point.pt = new_point.raw_pt;
+
+            ++offset;
+            // intensity skipped
+            ++offset;
+            // radial velocity skipped for now
+            ++offset;
+            new_point.alpha_timestamp = getFloatFromByteArray(buffer.data(), bufpos + offset * float_offset);
+
+            if (new_point.alpha_timestamp < frame_first_timestamp) {
+                frame_first_timestamp = new_point.alpha_timestamp;
+            }
+
+            if (new_point.alpha_timestamp > frame_last_timestamp) {
+                frame_last_timestamp = new_point.alpha_timestamp;
+            }
+
+            double r = new_point.raw_pt.norm();
+            if ((r > options.min_dist_lidar_center) && (r < options.max_dist_lidar_center)) {
+                frame.push_back(new_point);
+            }
+        }
+        frame.shrink_to_fit();
+
+        /// \todo fix timestamp
+        for (int i(0); i < (int) frame.size(); i++) {
+            frame[i].alpha_timestamp = min(1.0, max(0.0, 1 - (frame_last_timestamp - frame[i].alpha_timestamp) /
+                                                             (frame_last_timestamp - frame_first_timestamp))); //1.0
+        }
 
         return frame;
     }
@@ -707,6 +798,19 @@ namespace ct_icp {
     }
 
     /* -------------------------------------------------------------------------------------------------------------- */
+    ArrayPoses boreas_transform_trajectory_frame(const vector<TrajectoryFrame> &trajectory) {
+        ArrayPoses poses;
+        Eigen::Matrix4d T_as = T_Tr_BOREAS;  // T_applanix_sensor
+
+        poses.reserve(trajectory.size());
+        for (auto &frame: trajectory) {
+            const auto T_s0_st = frame.MidPose();
+            poses.emplace_back(T_as * T_s0_st * T_as.inverse());
+        }
+        return poses;
+    }
+
+    /* -------------------------------------------------------------------------------------------------------------- */
     ArrayPoses transform_trajectory_frame(const DatasetOptions &options, const vector<TrajectoryFrame> &trajectory,
                                           int sequence_id) {
         switch (options.dataset) {
@@ -721,6 +825,8 @@ namespace ct_icp {
                 return kitti_360_transform_trajectory_frame(trajectory, sequence_id);
             case NCLT:
                 return nclt_transform_trajectory_frame(trajectory);
+            case BOREAS:
+                return boreas_transform_trajectory_frame(trajectory);
         }
 
         throw std::runtime_error("Dataset Option not recognised");
@@ -742,6 +848,8 @@ namespace ct_icp {
                 return false;
             case NCLT:
                 // TODO Ground truth for NCLT
+                return false;
+            case BOREAS:
                 return false;
         }
         throw std::runtime_error("Dataset Option not recognised");
@@ -997,6 +1105,45 @@ namespace ct_icp {
         std::string sequence_name_, root_path_;
     };
 
+    /// Iterator for BOREAS and AEVA
+    class BOREASIterator : public DatasetSequence {
+    public:
+        explicit BOREASIterator(const DatasetOptions &options, int sequence_id = -1) : options_(options),
+                                                                                       sequence_id_(sequence_id) {
+            switch (options.dataset) {
+                case BOREAS:
+                    num_frames_ = CountNumFilesInDirectory(pointclouds_dir_path(options, options.root_path),
+                                                           &filenames_);
+                    std::sort(filenames_.begin(), filenames_.end());
+                    break;
+                default:
+                    num_frames_ = -1;
+                    break;
+            }
+        }
+
+        ~BOREASIterator() = default;
+
+        std::vector<Point3D> Next() override {
+            int frame_id = frame_id_++;
+            std::vector<Point3D> pc;
+            auto filename = filenames_[frame_id];
+            pc = read_bin_pointcloud(options_, filename);
+            return pc;
+        }
+
+        [[nodiscard]] bool HasNext() const override {
+            return frame_id_ < num_frames_;
+        }
+
+    private:
+        std::vector<std::string> filenames_;
+        DatasetOptions options_;
+        int sequence_id_;
+        int frame_id_ = 0;
+        int num_frames_;
+    };
+
     /* -------------------------------------------------------------------------------------------------------------- */
     std::shared_ptr<DatasetSequence> get_dataset_sequence(const DatasetOptions &options, int sequence_id) {
         switch (options.dataset) {
@@ -1007,6 +1154,8 @@ namespace ct_icp {
                 return std::make_shared<DirectoryIterator>(options, sequence_id);
             case NCLT:
                 return std::make_shared<NCLTIterator>(options, sequence_id);
+            case BOREAS:
+                return std::make_shared<BOREASIterator>(options, sequence_id);
             case PLY_DIRECTORY:
                 return std::make_shared<DirectoryIterator>(options);
             default:

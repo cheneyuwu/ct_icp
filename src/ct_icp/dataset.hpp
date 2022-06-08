@@ -12,7 +12,8 @@ namespace ct_icp {
         KITTI = 2,
         KITTI_360 = 3,
         NCLT = 4,
-        PLY_DIRECTORY = 5
+        BOREAS = 5,
+        PLY_DIRECTORY = 6
     };
 
     class DatasetSequence {
