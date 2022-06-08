@@ -326,8 +326,9 @@ int main(int argc, char **argv) {
   auto node = rclcpp::Node::make_shared("ct_icp_slam");
   auto odometry_publisher = node->create_publisher<nav_msgs::msg::Odometry>("/ct_icp_odometry", 10);
   auto tf_bc = std::make_shared<tf2_ros::TransformBroadcaster>(node);
-  auto sampled_points_publisher = node->create_publisher<sensor_msgs::msg::PointCloud2>("/ct_icp_sampled", 5);
-  auto map_points_publisher = node->create_publisher<sensor_msgs::msg::PointCloud2>("/ct_icp_map", 5);
+  auto raw_points_publisher = node->create_publisher<sensor_msgs::msg::PointCloud2>("/ct_icp_raw", 2);
+  auto sampled_points_publisher = node->create_publisher<sensor_msgs::msg::PointCloud2>("/ct_icp_sampled", 2);
+  auto map_points_publisher = node->create_publisher<sensor_msgs::msg::PointCloud2>("/ct_icp_map", 2);
 
   auto to_pc2_msg = [](const auto &points, const std::string &frame_id = "world") {
     pcl::PointCloud<PCLPoint3D> points_pcl;
@@ -407,6 +408,14 @@ int main(int argc, char **argv) {
       auto time_start_frame = std::chrono::steady_clock::now();
       std::vector<Point3D> frame = iterator_ptr->Next();
 
+      /// publish raw points info to rviz
+      {
+        /// raw points
+        auto &raw_points = frame;
+        auto raw_points_msg = to_pc2_msg(raw_points, "lidar");
+        raw_points_publisher->publish(raw_points_msg);
+      }
+
       auto time_read_pointcloud = std::chrono::steady_clock::now();
 
       auto summary = ct_icp_odometry.RegisterFrame(frame);
@@ -436,7 +445,7 @@ int main(int argc, char **argv) {
         auto T_ws_msg = tf2::eigenToTransform(Eigen::Affine3d(T_ws));
         T_ws_msg.header.frame_id = "world";
         // T_ws_msg.header.stamp = rclcpp::Time(stamp);
-        T_ws_msg.child_frame_id = "robot";
+        T_ws_msg.child_frame_id = "lidar";
         tf_bc->sendTransform(T_ws_msg);
 
         /// sampled points
@@ -450,11 +459,16 @@ int main(int argc, char **argv) {
         map_points_publisher->publish(map_points_msg);
       }
 
+      if (!rclcpp::ok()) {
+        LOG(INFO) << "Shutting down due to ctrl-c." << std::endl;
+        return 0;
+      }
+
       if (!summary.success) {
         LOG(ERROR) << "Error while running SLAM for sequence " << sequence_id << ", at frame index " << frame_id
                    << ". Error Message: " << summary.error_message << std::endl;
         if (options.suspend_on_failure) {
-          exit(1);
+          return 1;
         }
         break;
       }
