@@ -93,6 +93,21 @@ ExternalProject_Add(
 	DEPENDS	 	
 	BUILD_COMMAND     ${CMAKE_COMMAND} --build <BINARY_DIR> --config ${CMAKE_BUILD_TYPE} --parallel 6)
 
+# Install Tessil
+ExternalProject_Add(
+	tessil	
+	PREFIX tessil 
+
+	GIT_REPOSITORY  https://github.com/Tessil/robin-map
+	GIT_TAG v0.6.3
+
+	BUILD_ALWAYS OFF
+	INSTALL_DIR ${EXT_INSTALL_DIR}/tessil
+	CMAKE_ARGS
+		-DCMAKE_INSTALL_PREFIX=${EXT_INSTALL_DIR}/tessil
+	
+	DEPENDS	 	
+	BUILD_COMMAND     ${CMAKE_COMMAND} --build <BINARY_DIR> --config ${CMAKE_BUILD_TYPE} --parallel 6)
 
 if (WITH_VIZ3D)
 

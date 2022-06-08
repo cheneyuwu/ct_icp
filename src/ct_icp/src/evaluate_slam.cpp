@@ -91,7 +91,7 @@ namespace ct_icp {
         seq_err.mean_rpe = computeMeanRPE(poses_gt, poses_estimated, seq_err);
         return seq_err;
     }
-
+#if false
     /* -------------------------------------------------------------------------------------------------------------- */
     void SaveMetrics(const std::map<std::string, seq_errors> &metrics, const std::string &destination, bool success) {
         YAML::Emitter out;
@@ -122,7 +122,7 @@ namespace ct_icp {
         fout << out.c_str();
         fout.close();
     }
-
+#endif
 
     /* -------------------------------------------------------------------------------------------------------------- */
 }

@@ -14,9 +14,9 @@
 #include <exception>
 
 #include <Eigen/Dense>
-
+#if false
 #include "yaml-cpp/yaml.h"
-
+#endif
 #include "io.hpp"
 #include "types.hpp"
 

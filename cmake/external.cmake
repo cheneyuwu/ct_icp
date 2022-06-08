@@ -92,35 +92,23 @@ if (NOT TARGET Ceres::ceres)
 endif ()
 message(INFO "${LOG_PREFIX}Found Target Ceres::ceres")
 
-
-# Tessil (As a hashmap)
-FetchContent_Declare(
-        tessil
-        GIT_REPOSITORY https://github.com/Tessil/robin-map
-        GIT_TAG v0.6.3)
-
-if (NOT tessil_POPULATED)
-    set(BUILD_TESTING OFF)
-    FetchContent_Populate(tessil)
-
-    add_library(robin_map INTERFACE)
-    # Use tsl::robin_map as target, more consistent with other libraries conventions (Boost, Qt, ...)
-    add_library(tsl::robin_map ALIAS robin_map)
-
-    target_include_directories(robin_map INTERFACE
-            "$<BUILD_INTERFACE:${tessil_SOURCE_DIR}/include>")
-
-    list(APPEND headers "${tessil_SOURCE_DIR}/include/tsl/robin_growth_policy.h"
-            "${tessil_SOURCE_DIR}/include/tsl/robin_hash.h"
-            "${tessil_SOURCE_DIR}/include/tsl/robin_map.h"
-            "${tessil_SOURCE_DIR}/include/tsl/robin_set.h")
-    target_sources(robin_map INTERFACE "$<BUILD_INTERFACE:${headers}>")
-
-    if (MSVC)
-        target_sources(robin_map INTERFACE
-                "$<BUILD_INTERFACE:${tessil_SOURCE_DIR}/tsl-robin-map.natvis>")
+# Find Tessil
+if (NOT tessil_DIR)
+    set(tessil_DIR ${EXT_INSTALL_ROOT}/tessil/share/cmake/tsl-robin-map)
+endif ()
+if (NOT MSVC)
+    set("tessil_BINARY_DIR" "")
+endif ()
+find_package(tsl-robin-map REQUIRED CONFIG PATHS ${tessil_DIR} NO_DEFAULT_PATH)
+if (NOT TARGET tsl::robin_map)
+    if (TARGET robin_map)
+        message(INFO " ${LOG_PREFIX} Creating ALIAS target")
+        add_library(tsl::robin_map ALIAS robin_map)
+    else ()
+        message(FATAL_ERROR "${LOG_PREFIX} Could not find target tsl::robin_map")
     endif ()
 endif ()
+message(INFO "${LOG_PREFIX}Found Target tsl::robin_map")
 
 if (WITH_PYTHON_BINDING)
     # /////////////////////////////////////////////////////////////////////////////////////////////

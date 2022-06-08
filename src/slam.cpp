@@ -12,11 +12,11 @@
 #include <tclap/CmdLine.h>
 
 
-#include "ct_icp/odometry.hpp"
-#include "ct_icp/dataset.hpp"
-#include "ct_icp/io.hpp"
+#include "odometry.hpp"
+#include "dataset.hpp"
+#include "io.hpp"
 #include "evaluate_slam.hpp"
-#include "ct_icp/utils.hpp"
+#include "utils.hpp"
 
 #ifdef CT_ICP_WITH_VIZ
 
@@ -552,8 +552,10 @@ int main(int argc, char **argv) {
             {
                 sequence_name_to_errors[_sequence_name] = seq_error;
                 // Save Metrics to file
+#if false
                 ct_icp::SaveMetrics(sequence_name_to_errors, options.output_dir + "metrics.yaml",
                                     valid_trajectory);
+#endif
             };
         }
     }
