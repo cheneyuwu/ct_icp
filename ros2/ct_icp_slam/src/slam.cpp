@@ -2,7 +2,13 @@
 
 #include <glog/logging.h>
 
+#include "nav_msgs/msg/odometry.hpp"
+#include "pcl_conversions/pcl_conversions.h"
 #include "rclcpp/rclcpp.hpp"
+#include "sensor_msgs/msg/point_cloud2.hpp"
+#include "tf2/convert.h"
+#include "tf2_eigen/tf2_eigen.h"
+#include "tf2_ros/transform_broadcaster.h"
 
 #include "dataset.hpp"
 #include "evaluate_slam.hpp"
@@ -10,7 +16,67 @@
 #include "odometry.hpp"
 #include "utils.hpp"
 
+#define PCL_NO_PRECOMPILE
+#include <pcl/io/pcd_io.h>
+#include <pcl/pcl_macros.h>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+
 namespace ct_icp {
+
+#define PCL_ADD_FLEXIBLE     \
+  union EIGEN_ALIGN16 {      \
+    __uint128_t raw_flex1;   \
+    float data_flex1[4];     \
+    struct {                 \
+      float flex11;          \
+      float flex12;          \
+      float flex13;          \
+      float flex14;          \
+    };                       \
+    struct {                 \
+      float alpha_timestamp; \
+      float timestamp;       \
+    };                       \
+  };
+
+struct EIGEN_ALIGN16 _PCLPoint3D {
+  PCL_ADD_POINT4D;
+  PCL_ADD_FLEXIBLE;
+  PCL_MAKE_ALIGNED_OPERATOR_NEW
+};
+
+struct PCLPoint3D : public _PCLPoint3D {
+  inline PCLPoint3D() {
+    x = y = z = 0.0f;
+    data[3] = 1.0f;
+    raw_flex1 = 0;
+  }
+
+  inline PCLPoint3D(const _PCLPoint3D &p) {
+    x = p.x;
+    y = p.y;
+    z = p.z;
+    data[3] = 1.0f;
+    raw_flex1 = p.raw_flex1;
+  }
+
+  inline PCLPoint3D(const Point3D &p) {
+    x = (float)p.pt[0];
+    y = (float)p.pt[1];
+    z = (float)p.pt[2];
+    data[3] = 1.0f;
+    alpha_timestamp = p.alpha_timestamp;
+    timestamp = p.timestamp;
+  }
+
+  inline PCLPoint3D(const Eigen::Vector3d &p) {
+    x = (float)p[0];
+    y = (float)p[1];
+    z = (float)p[2];
+    data[3] = 1.0f;
+  }
+};
 
 enum SLAM_VIZ_MODE {
   AGGREGATED,  // Will display all aggregated frames
@@ -239,11 +305,40 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
 
 }  // namespace ct_icp
 
+// clang-format off
+POINT_CLOUD_REGISTER_POINT_STRUCT(
+    ct_icp::PCLPoint3D,
+    // cartesian coordinates
+    (float, x, x)
+    (float, y, y)
+    (float, z, z)
+    // random stuff
+    (float, flex11, flex11)
+    (float, flex12, flex12)
+    (float, flex13, flex13)
+    (float, flex14, flex14))
+// clang-format on
+
 int main(int argc, char **argv) {
   using namespace ct_icp;
 
   rclcpp::init(argc, argv);
   auto node = rclcpp::Node::make_shared("ct_icp_slam");
+  auto odometry_publisher = node->create_publisher<nav_msgs::msg::Odometry>("/ct_icp_odometry", 10);
+  auto tf_bc = std::make_shared<tf2_ros::TransformBroadcaster>(node);
+  auto sampled_points_publisher = node->create_publisher<sensor_msgs::msg::PointCloud2>("/ct_icp_sampled", 5);
+  auto map_points_publisher = node->create_publisher<sensor_msgs::msg::PointCloud2>("/ct_icp_map", 5);
+
+  auto to_pc2_msg = [](const auto &points, const std::string &frame_id = "world") {
+    pcl::PointCloud<PCLPoint3D> points_pcl;
+    points_pcl.reserve(points.size());
+    for (auto &pt : points) points_pcl.emplace_back(pt);
+    sensor_msgs::msg::PointCloud2 points_msg;
+    pcl::toROSMsg(points_pcl, points_msg);
+    points_msg.header.frame_id = frame_id;
+    // points_msg.header.stamp = rclcpp::Time(stamp);
+    return points_msg;
+  };
 
   // Logging
   FLAGS_log_dir = node->declare_parameter<std::string>("log_dir", "/tmp");
@@ -323,6 +418,37 @@ int main(int argc, char **argv) {
 
       registration_elapsed_ms += registration_elapsed.count() * 1000;
       all_seq_registration_elapsed_ms += registration_elapsed.count() * 1000;
+
+      /// publish odometry info to rviz
+      {
+        Eigen::Matrix4d T_ws = Eigen::Matrix4d::Identity();
+        T_ws.block<3, 3>(0, 0) = summary.frame.begin_R;
+        T_ws.block<3, 1>(0, 3) = summary.frame.begin_t;
+
+        /// odometry
+        nav_msgs::msg::Odometry odometry;
+        odometry.header.frame_id = "world";
+        // odometry.header.stamp = rclcpp::Time(stamp);
+        odometry.pose.pose = tf2::toMsg(Eigen::Affine3d(T_ws));
+        odometry_publisher->publish(odometry);
+
+        /// tf
+        auto T_ws_msg = tf2::eigenToTransform(Eigen::Affine3d(T_ws));
+        T_ws_msg.header.frame_id = "world";
+        // T_ws_msg.header.stamp = rclcpp::Time(stamp);
+        T_ws_msg.child_frame_id = "robot";
+        tf_bc->sendTransform(T_ws_msg);
+
+        /// sampled points
+        auto &sampled_points = summary.corrected_points;
+        auto sampled_points_msg = to_pc2_msg(sampled_points, "world");
+        sampled_points_publisher->publish(sampled_points_msg);
+
+        /// map points
+        auto map_points = ct_icp_odometry.GetLocalMap();
+        auto map_points_msg = to_pc2_msg(map_points, "world");
+        map_points_publisher->publish(map_points_msg);
+      }
 
       if (!summary.success) {
         LOG(ERROR) << "Error while running SLAM for sequence " << sequence_id << ", at frame index " << frame_id
