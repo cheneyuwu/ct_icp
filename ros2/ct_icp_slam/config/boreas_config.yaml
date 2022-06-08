@@ -15,6 +15,13 @@
     with_viz3d: false
     viz_mode: AGGREGATED
 
+    # VISUALIZATION OPTIONS ----
+    visualization_options:
+      odometry: true
+      raw_points: true
+      sampled_points: true
+      map_points: true
+
     # DATASET OPTIONS ----
     dataset_options:
       dataset: BOREAS # Options: [KITTI_raw / KITTI_CARLA / KITTI / KITTI-360 / BOREAS]

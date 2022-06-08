@@ -15,9 +15,16 @@
     with_viz3d: false
     viz_mode: AGGREGATED
 
+    # VISUALIZATION OPTIONS ----
+    visualization_options:
+      odometry: true
+      raw_points: true
+      sampled_points: true
+      map_points: true
+
     # DATASET OPTIONS ----
     dataset_options:
-      dataset: KITTI_raw # Options: [KITTI_raw / KITTI_CARLA / KITTI / KITTI-360]
+      dataset: KITTI_raw # Options: [KITTI_raw / KITTI_CARLA / KITTI / KITTI-360 / BOREAS]
       root_path: /home/yuchen/ASRL/data/KITTI_raw # Set to the root path of kitti's directory
       fail_if_incomplete: false
       min_dist_lidar_center: 5.0 # Suppresses points to close to the center of the sensor

@@ -89,25 +89,23 @@ struct SLAMOptions {
 
   OdometryOptions odometry_options;
 
-  int max_num_threads = 1;  // The maximum number of threads running in parallel the Dataset acquisition
-
-  bool suspend_on_failure = false;  // Whether to suspend the execution once an error is detected
-
-  bool save_trajectory = true;  // whether to save the trajectory
-
+  int max_num_threads = 1;               // The maximum number of threads running in parallel the Dataset acquisition
+  bool suspend_on_failure = false;       // Whether to suspend the execution once an error is detected
+  bool save_trajectory = true;           // whether to save the trajectory
   std::string output_dir = "./outputs";  // The output path (relative or absolute) to save the pointclouds
-
-  bool all_sequences = true;  // Whether to run the algorithm on all sequences of the dataset found on disk
-
-  std::string sequence;  // The desired sequence (only applicable if `all_sequences` is false)
-
-  int start_index = 0;  // The start index of the sequence (only applicable if `all_sequences` is false)
-
-  int max_frames = -1;  // The maximum number of frames to register (if -1 all frames in the Dataset are registered)
-
+  bool all_sequences = true;             // Whether to run the algorithm on all sequences of the dataset found on disk
+  std::string sequence;                  // The desired sequence (only applicable if `all_sequences` is false)
+  int start_index = 0;     // The start index of the sequence (only applicable if `all_sequences` is false)
+  int max_frames = -1;     // The maximum number of frames to register (if -1 all frames in the Dataset are registered)
   bool with_viz3d = true;  // Whether to display timing and debug information
-
   SLAM_VIZ_MODE viz_mode = KEYPOINTS;  // The visualization mode for the point clouds (in AGGREGATED, KEYPOINTS)
+
+  struct {
+    bool odometry = true;
+    bool raw_points = true;
+    bool sampled_points = true;
+    bool map_points = true;
+  } visualization_options;
 };
 
 #define ROS2_PARAM(node, receiver, prefix, param, type)                \
@@ -124,22 +122,34 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
   /// slam options
   {
     ROS2_PARAM_CLAUSE(node, options, prefix, max_num_threads, int);
-    ROS2_PARAM_CLAUSE(node, options, prefix, save_trajectory, bool);
     ROS2_PARAM_CLAUSE(node, options, prefix, suspend_on_failure, bool);
+    ROS2_PARAM_CLAUSE(node, options, prefix, save_trajectory, bool);
 
     ROS2_PARAM_CLAUSE(node, options, prefix, output_dir, std::string);
     if (!options.output_dir.empty() && options.output_dir[options.output_dir.size() - 1] != '/')
       options.output_dir += '/';
 
+    ROS2_PARAM_CLAUSE(node, options, prefix, all_sequences, bool);
     ROS2_PARAM_CLAUSE(node, options, prefix, sequence, std::string);
     ROS2_PARAM_CLAUSE(node, options, prefix, start_index, int);
-    ROS2_PARAM_CLAUSE(node, options, prefix, all_sequences, bool);
+    ROS2_PARAM_CLAUSE(node, options, prefix, max_frames, int);
     ROS2_PARAM_CLAUSE(node, options, prefix, with_viz3d, bool);
 
     std::string viz_mode;
     ROS2_PARAM(node, viz_mode, prefix, viz_mode, std::string);
     if (viz_mode == "AGGREGATED") options.viz_mode = AGGREGATED;
     if (viz_mode == "KEYPOINTS") options.viz_mode = KEYPOINTS;
+  }
+
+  /// visualization options
+  {
+    auto &visualization_options = options.visualization_options;
+    prefix = "visualization_options.";
+
+    ROS2_PARAM_CLAUSE(node, visualization_options, prefix, odometry, bool);
+    ROS2_PARAM_CLAUSE(node, visualization_options, prefix, raw_points, bool);
+    ROS2_PARAM_CLAUSE(node, visualization_options, prefix, sampled_points, bool);
+    ROS2_PARAM_CLAUSE(node, visualization_options, prefix, map_points, bool);
   }
 
   /// dataset options
@@ -410,9 +420,8 @@ int main(int argc, char **argv) {
       auto time_start_frame = std::chrono::steady_clock::now();
       std::vector<Point3D> frame = iterator_ptr->Next();
 
-      /// publish raw points info to rviz
-      {
-        /// raw points
+      /// raw points
+      if (options.visualization_options.raw_points) {
         auto &raw_points = frame;
         auto raw_points_msg = to_pc2_msg(raw_points, "lidar");
         raw_points_publisher->publish(raw_points_msg);
@@ -430,8 +439,8 @@ int main(int argc, char **argv) {
       registration_elapsed_ms += registration_elapsed.count() * 1000;
       all_seq_registration_elapsed_ms += registration_elapsed.count() * 1000;
 
-      /// publish odometry info to rviz
-      {
+      /// publish to rviz
+      if (options.visualization_options.odometry) {
         Eigen::Matrix4d T_ws = Eigen::Matrix4d::Identity();
         T_ws.block<3, 3>(0, 0) = summary.frame.begin_R;
         T_ws.block<3, 1>(0, 3) = summary.frame.begin_t;
@@ -449,12 +458,14 @@ int main(int argc, char **argv) {
         // T_ws_msg.header.stamp = rclcpp::Time(stamp);
         T_ws_msg.child_frame_id = "lidar";
         tf_bc->sendTransform(T_ws_msg);
-
+      }
+      if (options.visualization_options.sampled_points) {
         /// sampled points
         auto &sampled_points = summary.corrected_points;
         auto sampled_points_msg = to_pc2_msg(sampled_points, "world");
         sampled_points_publisher->publish(sampled_points_msg);
-
+      }
+      if (options.visualization_options.map_points) {
         /// map points
         auto map_points = ct_icp_odometry.GetLocalMap();
         auto map_points_msg = to_pc2_msg(map_points, "world");

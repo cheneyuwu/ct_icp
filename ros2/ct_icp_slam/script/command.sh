@@ -14,5 +14,13 @@ source /opt/ros/galactic/setup.bash
 ros2 run rviz2 rviz2 -d ${WORKING_DIR}/ros2/ct_icp_slam/rviz/slam.rviz # launch rviz
 
 ## Run odometry
+# - change config file
 source ${WORKING_DIR}/ros2/install/setup.bash
 ros2 run ct_icp_slam ct_icp_slam --ros-args --params-file ${WORKING_DIR}/ros2/ct_icp_slam/config/default_config.yaml
+
+## Evaluate odometry
+DATASET_DIR=/home/yuchen/ASRL/data/boreas/sequences
+RESULT_DIR=/home/yuchen/ASRL/temp/cticp/BOREAS
+source /home/yuchen/ASRL/venv/bin/activate
+python generate_boreas_odometry_result.py --dataset ${DATASET_DIR} --path ${RESULT_DIR}
+python -m pyboreas.eval.odometry --gt ${DATASET_DIR} --pred ${RESULT_DIR}/boreas_odometry_result
