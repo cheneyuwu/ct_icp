@@ -1,21 +1,20 @@
 import os
 import os.path as osp
-import sys
-import time
 import numpy as np
-import numpy.linalg as npla
 import scipy.spatial.transform as sptf
 import csv
 
 import rclpy
 from rclpy.node import Node
 from rclpy.time import Time
-from rclpy.time_source import CLOCK_TOPIC
-import sensor_msgs.msg as sensor_msgs
-import std_msgs.msg as std_msgs
 import geometry_msgs.msg as geometry_msgs
 import nav_msgs.msg as nav_msgs
-import rosgraph_msgs.msg as rosgraph_msgs
+
+from pylgmath import Transformation
+from pysteam.problem import OptimizationProblem, StaticNoiseModel, L2LossFunc, WeightedLeastSquareCostTerm
+from pysteam.solver import GaussNewtonSolver
+from pysteam.evaluable.se3 import SE3StateVar
+from pysteam.evaluable.p2p import P2PErrorEvaluator as p2p_error
 
 np.set_printoptions(precision=6, suppress=True)
 
@@ -181,27 +180,56 @@ def poses2path(T_0t_list, stamp, frame):
   return paths
 
 
+def align_path(T_aw_list, T_bw_list):
+  """Align Tb to Ta"""
+  T_ab = SE3StateVar(Transformation(T_ba=np.eye(4)))
+
+  noise_model = StaticNoiseModel(np.eye(3))
+  loss_func = L2LossFunc()
+  cost_terms = []
+  for idx in range(len(T_bw_list)):
+    error_func = p2p_error(T_ab, T_aw_list[idx][:, 3:], T_bw_list[idx][:, 3:])
+    cost_terms.append(WeightedLeastSquareCostTerm(error_func, noise_model, loss_func))
+
+  opt_prob = OptimizationProblem()
+  opt_prob.add_state_var(T_ab)
+  opt_prob.add_cost_term(*cost_terms)
+
+  gauss_newton = GaussNewtonSolver(opt_prob, verbose=True, max_iterations=100)
+  gauss_newton.optimize()
+
+  T_ab = T_ab.value.matrix()
+  T_bw_aligned = []
+  for T_bw in T_bw_list:
+    T_bw_aligned.append(T_ab @ T_bw)
+
+  return T_ab, T_bw_aligned
+
+
 def main(args=None):
   rclpy.init(args=args)
   node = Node("boreas_plotter")
 
+  # seq = 'boreas-2022-05-13-09-23'
+  # seq = 'boreas-2022-05-13-10-30'
+  seq = 'boreas-2022-05-13-11-47'
   # dataset_dir = '/home/yuchen/ASRL/data/BOREAS'
-  seq = 'boreas-2022-05-13-10-30'
   dataset_dir = '/home/yuchen/ASRL/data/boreas/sequences'
+  sensor = "lidar"
   result_dirs = [
-    "/home/yuchen/ASRL/temp/cticp/BOREAS/boreas_odometry_result",
-    "/media/yuchen/T7/ASRL/temp/lidar/boreas/" + seq + ".icp/odometry_result",
+    osp.join("/media/yuchen/T7/ASRL/temp/boreas", sensor, seq + ".icp", "odometry_result"),
+    osp.join("/home/yuchen/ASRL/temp/cticp/boreas", sensor, "elastic/boreas_odometry_result"),
   ]
 
-  T_applanix_lidar = np.loadtxt(osp.join(dataset_dir, seq, 'calib', 'T_applanix_lidar.txt'))
-  filepath = os.path.join(dataset_dir, seq, 'applanix/lidar_poses.csv')
-  T_aw_list, timestamps = read_traj_file_gt(filepath, T_applanix_lidar, 3)
-  T_a0_at_list = []
+  T_applanix_sensor = np.loadtxt(osp.join(dataset_dir, seq, 'calib', 'T_applanix_' + sensor + '.txt'))
+  filepath = os.path.join(dataset_dir, seq, 'applanix/' + sensor + '_poses.csv')
+  T_aw_list, timestamps = read_traj_file_gt(filepath, T_applanix_sensor, 3)
+  gt_T_a0_at_list = []
   for T_aw in T_aw_list:
-    T_a0_at_list.append(T_aw_list[0] @ get_inverse_tf(T_aw))
+    gt_T_a0_at_list.append(T_aw_list[0] @ get_inverse_tf(T_aw))
 
-  T_a0_at_list = T_a0_at_list[::10]  # downsample
-  path = poses2path(T_a0_at_list, Time(seconds=0).to_msg(), 'world')
+  gt_T_a0_at_list_sampled = gt_T_a0_at_list[::10]  # downsample
+  path = poses2path(gt_T_a0_at_list_sampled, Time(seconds=0).to_msg(), 'world')
   ground_truth_path_publisher = node.create_publisher(nav_msgs.Path, '/ground_truth_path', 10)
   ground_truth_path_publisher.publish(path)
 
@@ -219,8 +247,13 @@ def main(args=None):
     for j in range(len(T_a0_at_list)):
       T_a0_at_list[j] = T_a0_w @ T_a0_at_list[j]
 
-    T_a0_at_list = T_a0_at_list[::10]  # downsample
-    path = poses2path(T_a0_at_list, Time(seconds=0).to_msg(), 'world')
+    # align to ground truth frame
+    T_gt_pred, _ = align_path(gt_T_a0_at_list[:500], T_a0_at_list[:500])
+    for j in range(len(T_a0_at_list)):
+      T_a0_at_list[j] = T_gt_pred @ T_a0_at_list[j]
+
+    T_a0_at_list_sampled = T_a0_at_list[::10]  # downsample
+    path = poses2path(T_a0_at_list_sampled, Time(seconds=0).to_msg(), 'world')
     result_path_publisher = node.create_publisher(nav_msgs.Path, '/result_path' + str(i), 10)
     result_path_publisher.publish(path)
 

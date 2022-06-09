@@ -6,7 +6,7 @@
     max_num_threads: 1
     save_trajectory: true
     suspend_on_failure: false
-    output_dir: /home/yuchen/ASRL/temp/cticp/boreas/lidar/elastic
+    output_dir: /home/yuchen/ASRL/temp/cticp/boreas/aeva/steam
     all_sequences: true
     sequence: "boreas-2022-05-13-10-30" # Ignored if use_all_sequences is true
     start_index: 0 # The initial frame index for the given sequence
@@ -24,7 +24,7 @@
 
     # DATASET OPTIONS ----
     dataset_options:
-      dataset: BOREAS # Options: [KITTI_raw / KITTI_CARLA / KITTI / KITTI-360 / BOREAS]
+      dataset: AEVA # Options: [KITTI_raw / KITTI_CARLA / KITTI / KITTI-360 / BOREAS / AEVA]
       root_path: /home/yuchen/ASRL/data/BOREAS # Set to the root path of kitti's directory
       fail_if_incomplete: false
       min_dist_lidar_center: 5.0 # Suppresses points to close to the center of the sensor
@@ -47,7 +47,7 @@
       # CT_ICP OPTIONS ----
       ct_icp_options:
         size_voxel_map: 1.0 # The voxel size of in the voxel map
-        num_iters_icp: 5 # The number of iterations of the ICP
+        num_iters_icp: 10 # The number of iterations of the ICP
         min_number_neighbors: 20 # The minimum number of neighbor points to define a valid neighborhood
         voxel_neighborhood: 1
         max_number_neighbors: 20
@@ -60,7 +60,7 @@
         beta_location_consistency: 0.001
         beta_constant_velocity: 0.001
 
-        solver: GN # Options: [GN=Gauss-Newton, CERES, STEAM]
+        solver: STEAM # Options: [GN=Gauss-Newton, CERES, STEAM]
         loss_function: HUBER # Options: [STANDARD, CAUCHY, HUBER, TOLERANT, TRUNCATED] (for CERES solver)
         ls_max_num_iters: 1 # The number of steps performed for each iteration of the ICP (for CERES solver)
         ls_num_threads: 16 # The number of threads to build and solve the least square system (for CERES solver)

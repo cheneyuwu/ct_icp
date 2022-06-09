@@ -104,27 +104,15 @@ namespace ct_icp {
     const int NCLT_NUM_SEQUENCES = 27;
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    /// HARD CODED VALUES FOR BOREAS /// \todo fill in values
+    /// HARD CODED VALUES FOR BOREAS
 
     const char *BOREAS_SEQUENCE_NAMES[] = {
+            "boreas-2022-05-13-09-23",  // highway 7 sequence 1
             "boreas-2022-05-13-10-30",  // north dufferin sequence 2
+            "boreas-2022-05-13-11-47",  // glen shield sequence 1
     };
 
-    const int NUMBER_SEQUENCES_BOREAS = 1;
-
-    // Calibration  T_applanix_liar (re-calibrated)
-#if true
-    const double T_Tr_data_BOREAS[] = { 1.,  0.,  0.,  0.,
-                                        0.,  1.,  0.,  0.,
-                                        0.,  0.,  1.,  0.,
-                                        0.,  0.,  0.,  1. };
-#else
-    const double T_Tr_data_BOREAS[] = { 0.72225879, -0.69151961, -0.01195308,  0.        ,
-                                        0.69155896,  0.7223193 , -0.00117318,  0.        ,
-                                        0.00944496, -0.00741879,  0.99992795,  0.31601375,
-                                        0.        ,  0.        ,  0.        ,  1.          };
-#endif
-    const Eigen::Matrix4d T_Tr_BOREAS(T_Tr_data_BOREAS);
+    const int NUMBER_SEQUENCES_BOREAS = 3;
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -147,6 +135,9 @@ namespace ct_icp {
                 break;
             case BOREAS:
                 folder_path += sequence_name + "/lidar/";
+                break;
+            case AEVA:
+                folder_path += sequence_name + "/aeva/";
                 break;
             case NCLT:
                 throw std::runtime_error("Not Implemented!");
@@ -243,6 +234,7 @@ namespace ct_icp {
                 num_sequences = 27;
                 break;
             case BOREAS:
+            case AEVA:
                 num_sequences = NUMBER_SEQUENCES_BOREAS;
                 break;
             case PLY_DIRECTORY:
@@ -292,6 +284,7 @@ namespace ct_icp {
                             std::string(NCLT_SEQUENCE_NAMES[new_sequence_info.sequence_id]) + "_vel";
                     break;
                 case BOREAS:
+                case AEVA:
                     new_sequence_info.sequence_id = i;
                     new_sequence_info.sequence_size = -1;
                     new_sequence_info.sequence_name = BOREAS_SEQUENCE_NAMES[new_sequence_info.sequence_id];
@@ -361,6 +354,7 @@ namespace ct_icp {
             case NCLT:
                 return NCLT_SEQUENCE_NAMES[sequence_id];
             case BOREAS:
+            case AEVA:
                 return BOREAS_SEQUENCE_NAMES[sequence_id];
             case PLY_DIRECTORY:
                 return "PLY_DIRECTORY";
@@ -807,12 +801,9 @@ namespace ct_icp {
     /* -------------------------------------------------------------------------------------------------------------- */
     ArrayPoses boreas_transform_trajectory_frame(const vector<TrajectoryFrame> &trajectory) {
         ArrayPoses poses;
-        Eigen::Matrix4d T_al = T_Tr_BOREAS;  // T_applanix_lidar
-
         poses.reserve(trajectory.size());
         for (auto &frame: trajectory) {
-            const auto T_s0_st = frame.MidPose();
-            poses.emplace_back(T_al * T_s0_st * T_al.inverse());
+            poses.emplace_back(frame.MidPose());
         }
         return poses;
     }
@@ -833,6 +824,7 @@ namespace ct_icp {
             case NCLT:
                 return nclt_transform_trajectory_frame(trajectory);
             case BOREAS:
+            case AEVA:
                 return boreas_transform_trajectory_frame(trajectory);
         }
 
@@ -857,6 +849,7 @@ namespace ct_icp {
                 // TODO Ground truth for NCLT
                 return false;
             case BOREAS:
+            case AEVA:
                 return false;
         }
         throw std::runtime_error("Dataset Option not recognised");
@@ -1165,6 +1158,7 @@ namespace ct_icp {
             case NCLT:
                 return std::make_shared<NCLTIterator>(options, sequence_id);
             case BOREAS:
+            case AEVA:
                 return std::make_shared<BOREASIterator>(options, sequence_id);
             case PLY_DIRECTORY:
                 return std::make_shared<DirectoryIterator>(options);
