@@ -39,17 +39,33 @@ def get_T_applanix_sensor_func(sensor):
     elif sensor == "velodyne":
       T_applanix_lidar = sequence.calib.T_applanix_lidar
       print("T_applanix_lidar before:\n", T_applanix_lidar)
-      # # this is a correction to the calibration
+      ## this is obtained from steam icp
+      T_agt_apd = np.array([
+          [0.999747, -0.019076, -0.011934, -0.007568],
+          [0.019052,  0.999816, -0.002173, -0.01067 ],
+          [0.011973,  0.001945,  0.999926, -0.183529],
+          [0.      ,  0.,        0.,        1.      ],
+      ])
+      T_applanix_lidar = T_agt_apd @ T_applanix_lidar
+      ## this is obtained from elastic icp
       # T_agt_apd = np.array([
-      #     [0.999747, -0.019076, -0.011934, -0.007568],
-      #     [0.019052, 0.999816, -0.002173, -0.01067],
-      #     [0.011973, 0.001945, 0.999926, -0.183529],
-      #     [0., 0., 0., 1.],
+      #     # [0.998827, -0.019172, -0.044469,  0.003457],
+      #     # [0.019183,  0.999816, -0.00018 , -0.037566],
+      #     # [0.044465, -0.000673,  0.999011, -0.107936],
+      #     # [0.      ,  0.      ,  0.      ,  1.      ],
+      #     # [0.999552, -0.000038, -0.029945,  0.005274],
+      #     # [0.000097,  0.999998,  0.001969, -0.027022],
+      #     # [0.029945, -0.001971,  0.99955 ,  0.07569 ],
+      #     # [0.      ,  0.      ,  0.      ,  1.      ],
+      #     [ 0.999727, -0.019749,  0.012491, -0.160597],
+      #     [ 0.019656,  0.999779,  0.007515, -0.018761],
+      #     [-0.012636, -0.007267,  0.999894,  1.354525],
+      #     [ 0.      ,  0.      ,  0.      ,  1.      ],
       # ])
       # T_applanix_lidar = T_agt_apd @ T_applanix_lidar
-      # # T_applanix_lidar[:2, 3] = 0.
-      # # T_applanix_lidar[2, 3] = 0.31601375
-      # print("T_applanix_lidar after:\n", T_applanix_lidar)
+      # T_applanix_lidar[:2, 3] = 0.
+      # T_applanix_lidar[2, 3] = 0.31601375
+      print("T_applanix_lidar after:\n", T_applanix_lidar)
       return T_applanix_lidar
     else:
       raise ValueError("Unknown sensor:", sensor)

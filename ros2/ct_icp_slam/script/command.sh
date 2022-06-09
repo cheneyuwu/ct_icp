@@ -19,7 +19,7 @@ source ${WORKING_DIR}/ros2/install/setup.bash
 ros2 run ct_icp_slam ct_icp_slam --ros-args --params-file ${WORKING_DIR}/ros2/ct_icp_slam/config/boreas_config.yaml
 ## Evaluate odometry
 DATASET_DIR=/home/yuchen/ASRL/data/boreas/sequences
-RESULT_DIR=/home/yuchen/ASRL/temp/cticp/BOREAS
+RESULT_DIR=/home/yuchen/ASRL/temp/cticp/boreas/lidar/elastic
 source /home/yuchen/ASRL/venv/bin/activate
 python generate_boreas_odometry_result.py --dataset ${DATASET_DIR} --path ${RESULT_DIR} --sensor velodyne
 python -m pyboreas.eval.odometry --gt ${DATASET_DIR} --pred ${RESULT_DIR}/boreas_odometry_result
@@ -31,7 +31,7 @@ source ${WORKING_DIR}/ros2/install/setup.bash
 ros2 run ct_icp_slam ct_icp_slam --ros-args --params-file ${WORKING_DIR}/ros2/ct_icp_slam/config/aeva_config.yaml
 ## Evaluate odometry
 DATASET_DIR=/home/yuchen/ASRL/data/boreas/sequences
-RESULT_DIR=/home/yuchen/ASRL/temp/cticp/AEVA
+RESULT_DIR=/home/yuchen/ASRL/temp/cticp/boreas/aeva/elastic
 source /home/yuchen/ASRL/venv/bin/activate
 python generate_boreas_odometry_result.py --dataset ${DATASET_DIR} --path ${RESULT_DIR} --sensor aeva
 python -m pyboreas.eval.odometry_aeva --gt ${DATASET_DIR} --pred ${RESULT_DIR}/boreas_odometry_result
