@@ -33,5 +33,6 @@ ros2 run ct_icp_slam ct_icp_slam --ros-args --params-file ${WORKING_DIR}/ros2/ct
 DATASET_DIR=/home/yuchen/ASRL/data/boreas/sequences
 RESULT_DIR=/home/yuchen/ASRL/temp/cticp/boreas/aeva/elastic
 source /home/yuchen/ASRL/venv/bin/activate
+cd /home/yuchen/ASRL/ct_icp/ros2/ct_icp_slam/script
 python generate_boreas_odometry_result.py --dataset ${DATASET_DIR} --path ${RESULT_DIR} --sensor aeva
 python -m pyboreas.eval.odometry_aeva --gt ${DATASET_DIR} --pred ${RESULT_DIR}/boreas_odometry_result

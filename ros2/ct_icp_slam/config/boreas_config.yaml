@@ -67,3 +67,10 @@
         ls_sigma: 0.1 # The sigma parameter for loss CAUCHY, HUBER, TOLERANT, TRUNCATED (for CERES solver)
         ls_tolerant_min_threshold: 0.05 # The tolerant parameter for loss TOLERANT (for CERES solver)
 
+        steam:
+          qc_inv_diag: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+          lock_prev_pose: false
+          lock_prev_vel: false
+          prev_pose_as_prior: false
+          prev_vel_as_prior: false
+          max_iterations: 1

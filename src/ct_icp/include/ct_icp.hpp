@@ -131,6 +131,16 @@ namespace ct_icp {
         bool debug_viz = false; // Whether to pass the key points to the ExplorationEngine
 
         VIZ_MODE viz_mode = TIMESTAMP;
+
+        /* ---------------------------------------------------------------------------------------------------------- */
+        struct {
+            Eigen::Matrix<double, 6, 6> qc_inv = Eigen::Matrix<double, 6, 6>::Identity();
+            bool lock_prev_pose = false;
+            bool lock_prev_vel = false;
+            bool prev_pose_as_prior = false;
+            bool prev_vel_as_prior = false;
+            int max_iterations = 1;
+        } steam;
     };
 
     struct ICPSummary {

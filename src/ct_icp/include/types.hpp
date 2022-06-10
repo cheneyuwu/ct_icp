@@ -54,6 +54,10 @@ namespace ct_icp {
         Eigen::Vector3d end_t;
 
         steam::traj::const_vel::Interface::Ptr steam_traj;
+        Eigen::Matrix<double, 6, 6> begin_T_rm_cov = Eigen::Matrix<double, 6, 6>::Identity();
+        Eigen::Matrix<double, 6, 6> begin_w_mr_inr_cov = Eigen::Matrix<double, 6, 6>::Identity();
+        Eigen::Matrix<double, 6, 6> end_T_rm_cov = Eigen::Matrix<double, 6, 6>::Identity();
+        Eigen::Matrix<double, 6, 6> end_w_mr_inr_cov = Eigen::Matrix<double, 6, 6>::Identity();
 
         inline double EgoAngularDistance() const {
             return AngularDistance(begin_R, end_R);

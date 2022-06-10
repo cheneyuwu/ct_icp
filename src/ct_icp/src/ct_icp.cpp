@@ -1005,9 +1005,6 @@ namespace ct_icp {
     ICPSummary CT_ICP_STEAM(const CTICPOptions &options,
                             const VoxelHashMap &voxels_map, std::vector<Point3D> &keypoints,
                             std::vector<TrajectoryFrame> &trajectory, int index_frame) {
-        std::cout << "[CT_ICP_STEAM] begin_timestamp: " << trajectory[index_frame].begin_timestamp << std::endl;
-        std::cout << "[CT_ICP_STEAM] end_timestamp: " << trajectory[index_frame].end_timestamp << std::endl;
-
         using namespace steam;
         using namespace steam::se3;
         using namespace steam::traj;
@@ -1019,38 +1016,58 @@ namespace ct_icp {
         Eigen::Matrix4d begin_T_mr = Eigen::Matrix4d::Identity();
         begin_T_mr.block(0, 0, 3, 3) = trajectory[index_frame].begin_R;
         begin_T_mr.block(0, 3, 3, 1) = trajectory[index_frame].begin_t;
-        Eigen::Matrix<double, 6, 1> begin_W_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
+        Eigen::Matrix<double, 6, 1> begin_w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
         // last state
         Time end_time(static_cast<double>(trajectory[index_frame].end_timestamp));
         Eigen::Matrix4d end_T_mr = Eigen::Matrix4d::Identity();
         end_T_mr.block(0, 0, 3, 3) = trajectory[index_frame].end_R;
         end_T_mr.block(0, 3, 3, 1) = trajectory[index_frame].end_t;
-        Eigen::Matrix<double, 6, 1> end_W_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
+        Eigen::Matrix<double, 6, 1> end_w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
 
         // use previous trajectory to initialize velocity
         auto prev_steam_trajectory = trajectory[index_frame - 1].steam_traj;
         if (prev_steam_trajectory != nullptr) {
-            begin_W_mr_inr = prev_steam_trajectory->getVelocityInterpolator(begin_time)->evaluate();
-            std::cout << "[CT_ICP_STEAM] initialize begin_W_mr_inr: " << begin_W_mr_inr.transpose() << std::endl;
-            end_W_mr_inr = prev_steam_trajectory->getVelocityInterpolator(end_time)->evaluate();
-            std::cout << "[CT_ICP_STEAM] initialize end_W_mr_inr: " << end_W_mr_inr.transpose() << std::endl;
+            begin_w_mr_inr = prev_steam_trajectory->getVelocityInterpolator(begin_time)->evaluate();
+            std::cout << "[CT_ICP_STEAM] initialize begin_W_mr_inr: " << begin_w_mr_inr.transpose() << std::endl;
+            end_w_mr_inr = prev_steam_trajectory->getVelocityInterpolator(end_time)->evaluate();
+            std::cout << "[CT_ICP_STEAM] initialize end_W_mr_inr: " << end_w_mr_inr.transpose() << std::endl;
         }
 
         // Convert initial and final pose to trajectory
-        Eigen::Matrix<double, 6, 6> steam_traj_qc_inv = Eigen::Matrix<double, 6, 6>::Zero(); /// \todo cticp parameter
-        steam_traj_qc_inv.diagonal() << 1.0, 0.1, 0.1, 0.1, 0.1, 1.0;
-        const auto steam_trajectory = const_vel::Interface::MakeShared(steam_traj_qc_inv, true);
+        const auto steam_trajectory = const_vel::Interface::MakeShared(options.steam.qc_inv, true);
 
         std::vector<StateVarBase::Ptr> steam_state_vars;
 
+        if (prev_steam_trajectory != nullptr) {
+            std::cout << "[CT_ICP_STEAM] prev_timestamp: " << trajectory[index_frame - 1].end_timestamp << std::endl;
+            Time prev_time(static_cast<double>(trajectory[index_frame - 1].end_timestamp));
+            auto prev_T_rm_cov = trajectory[index_frame - 1].end_T_rm_cov;
+            auto prev_w_mr_inr_cov = trajectory[index_frame - 1].end_w_mr_inr_cov;
+
+            const auto prev_T_rm = prev_steam_trajectory->getPoseInterpolator(prev_time)->evaluate();
+            const auto prev_w_mr_inr = prev_steam_trajectory->getVelocityInterpolator(prev_time)->evaluate();
+            auto prev_T_rm_var = SE3StateVar::MakeShared(prev_T_rm);
+            auto prev_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(prev_w_mr_inr);
+            steam_trajectory->add(prev_time, prev_T_rm_var, prev_w_mr_inr_var);
+            steam_state_vars.emplace_back(prev_T_rm_var);
+            steam_state_vars.emplace_back(prev_w_mr_inr_var);
+            if (options.steam.lock_prev_pose) prev_T_rm_var->locked() = true;
+            if (options.steam.lock_prev_vel) prev_w_mr_inr_var->locked() = true;
+            if (options.steam.prev_pose_as_prior) steam_trajectory->addPosePrior(prev_time, prev_T_rm, prev_T_rm_cov);
+            if (options.steam.prev_vel_as_prior) steam_trajectory->addVelocityPrior(prev_time, prev_w_mr_inr, prev_w_mr_inr_cov);
+        }
+
+        std::cout << "[CT_ICP_STEAM] begin_timestamp: " << trajectory[index_frame].begin_timestamp << std::endl;
+        std::cout << "[CT_ICP_STEAM] end_timestamp: " << trajectory[index_frame].end_timestamp << std::endl;
+
         auto begin_T_rm_var = SE3StateVar::MakeShared(lgmath::se3::Transformation(begin_T_mr).inverse());
-        auto begin_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(begin_W_mr_inr);
+        auto begin_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(begin_w_mr_inr);
         steam_trajectory->add(begin_time, begin_T_rm_var, begin_w_mr_inr_var);
         steam_state_vars.emplace_back(begin_T_rm_var);
         steam_state_vars.emplace_back(begin_w_mr_inr_var);
 
         auto end_T_rm_var = SE3StateVar::MakeShared(lgmath::se3::Transformation(end_T_mr).inverse());
-        auto end_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(end_W_mr_inr);
+        auto end_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(end_w_mr_inr);
         steam_trajectory->add(end_time, end_T_rm_var, end_w_mr_inr_var);
         steam_state_vars.emplace_back(end_T_rm_var);
         steam_state_vars.emplace_back(end_w_mr_inr_var);
@@ -1140,6 +1157,7 @@ namespace ct_icp {
                     number_keypoints_used++;
 
                     Eigen::Matrix3d W = (closest_pt_normal * closest_pt_normal.transpose() + 1e-5 * Eigen::Matrix3d::Identity());
+                    // std::cout << closest_pt_normal.transpose() << std::endl;
                     auto noise_model = StaticNoiseModel<3>::MakeShared(W, NoiseType::INFORMATION);
 
                     // query and reference point
@@ -1181,12 +1199,12 @@ namespace ct_icp {
             using SolverType = VanillaGaussNewtonSolver;
             SolverType::Params params;
             params.verbose = false;
-            params.maxIterations = 5; /// \todo cticp parameter
+            params.maxIterations = (unsigned int)options.steam.max_iterations;
             SolverType solver(&problem, params);
             try {
                 solver.optimize();
             } catch (const decomp_failure &) {
-                std::cout << "Steam optimization failed! T_m_s left unchanged." << std::endl;
+                std::cout << "Steam optimization failed!" << std::endl;
             }
 
             //Update (changes trajectory data)
@@ -1207,6 +1225,16 @@ namespace ct_icp {
             current_estimate.end_t = end_T_mr.block<3, 1>(0, 3);
 
             current_estimate.steam_traj = steam_trajectory;
+            try {
+                Eigen::MatrixXd begin_time_cov = steam_trajectory->getCovariance(solver, begin_time);
+                current_estimate.begin_T_rm_cov = begin_time_cov.block<6, 6>(0, 0);
+                current_estimate.begin_w_mr_inr_cov = begin_time_cov.block<6, 6>(6, 6);
+                Eigen::MatrixXd end_time_cov = steam_trajectory->getCovariance(solver, end_time);
+                current_estimate.end_T_rm_cov = end_time_cov.block<6, 6>(0, 0);
+                current_estimate.end_w_mr_inr_cov = end_time_cov.block<6, 6>(6, 6);
+            } catch (const std::runtime_error &) {
+                std::cout << "Steam optimization failed! (Cannot query covariance)" << std::endl;
+            }
 
             auto solve_step = std::chrono::steady_clock::now();
             std::chrono::duration<double> _elapsed_solve = solve_step - start;
@@ -1227,6 +1255,7 @@ namespace ct_icp {
             std::chrono::duration<double> _elapsed_update = update_step - solve_step;
             elapsed_update += _elapsed_update.count() * 1000.0;
 
+            // std::cout << "Difference: diff_rot=" << diff_rot << ", diff_trans=" << diff_trans << std::endl;
             if ((index_frame > 1) && (diff_rot < options.threshold_orientation_norm &&
                                       diff_trans < options.threshold_translation_norm)) {
                 summary.success = true;

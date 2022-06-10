@@ -108,8 +108,10 @@ struct SLAMOptions {
   } visualization_options;
 };
 
-#define ROS2_PARAM(node, receiver, prefix, param, type)                \
-  receiver = node->declare_parameter<type>(prefix + #param, receiver); \
+#define ROS2_PARAM_NO_LOG(node, receiver, prefix, param, type) \
+  receiver = node->declare_parameter<type>(prefix + #param, receiver);
+#define ROS2_PARAM(node, receiver, prefix, param, type)   \
+  ROS2_PARAM_NO_LOG(node, receiver, prefix, param, type); \
   LOG(INFO) << "Parameter " << prefix + #param << " = " << receiver << std::endl;
 #define ROS2_PARAM_CLAUSE(node, config, prefix, param, type)                   \
   config.param = node->declare_parameter<type>(prefix + #param, config.param); \
@@ -312,6 +314,23 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       ct_icp_options.loss_function = TRUNCATED;
     else
       throw std::runtime_error("Invalid loss_function");
+
+    {
+      auto &steam = options.odometry_options.ct_icp_options.steam;
+      prefix = "odometry_options.ct_icp_options.steam.";
+
+      std::vector<double> qc_inv_diag;
+      ROS2_PARAM_NO_LOG(node, qc_inv_diag, prefix, qc_inv_diag, std::vector<double>);
+      if (qc_inv_diag.size() != 6) throw std::invalid_argument{"Qc diagonal malformed. Must be 6 elements!"};
+      steam.qc_inv.diagonal() << qc_inv_diag[0], qc_inv_diag[1], qc_inv_diag[2], qc_inv_diag[3], qc_inv_diag[4],
+          qc_inv_diag[5];
+
+      ROS2_PARAM_CLAUSE(node, steam, prefix, lock_prev_pose, bool);
+      ROS2_PARAM_CLAUSE(node, steam, prefix, lock_prev_vel, bool);
+      ROS2_PARAM_CLAUSE(node, steam, prefix, prev_pose_as_prior, bool);
+      ROS2_PARAM_CLAUSE(node, steam, prefix, prev_vel_as_prior, bool);
+      ROS2_PARAM_CLAUSE(node, steam, prefix, max_iterations, int);
+    }
   }
 
   return options;
