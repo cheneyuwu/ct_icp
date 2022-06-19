@@ -107,6 +107,7 @@ check_status_code $?
 
 echo "[CT_ICP] -- [CT_ICP_SLAM] -- building ros2 package"
 cd ${SRC_DIR}/ros2
+source /opt/ros/galactic/setup.bash
 colcon build --symlink-install \
 	--cmake-args \
 		-DCMAKE_BUILD_TYPE=${BUILD_TYPE} \

@@ -8,6 +8,9 @@ CT_ICP_ROOT=${WORKING_DIR}/cmake-build-Release/ct_icp/install/Release
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${EXTERNAL_ROOT}/Ceres/lib:${EXTERNAL_ROOT}/glog/lib
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${LGMATH_ROOT}/lib:${STEAM_ROOT}/lib:${CT_ICP_ROOT}/lib
 
+## Installation
+bash ct_icp_build.sh Release "Unix Makefiles"
+
 ## First launch RViz for visualization
 source /opt/ros/galactic/setup.bash
 ros2 run rviz2 rviz2 -d ${WORKING_DIR}/ros2/ct_icp_slam/rviz/slam.rviz # launch rviz

@@ -8,6 +8,7 @@
 #include "sensor_msgs/msg/point_cloud2.hpp"
 #include "tf2/convert.h"
 #include "tf2_eigen/tf2_eigen.h"
+#include "tf2_ros/static_transform_broadcaster.h"
 #include "tf2_ros/transform_broadcaster.h"
 
 #include "dataset.hpp"
@@ -15,6 +16,8 @@
 #include "io.hpp"
 #include "odometry.hpp"
 #include "utils.hpp"
+
+#include "lgmath.hpp"
 
 #define PCL_NO_PRECOMPILE
 #include <pcl/io/pcd_io.h>
@@ -105,6 +108,7 @@ struct SLAMOptions {
     bool raw_points = true;
     bool sampled_points = true;
     bool map_points = true;
+    Eigen::Matrix4d T_sr = Eigen::Matrix4d::Identity();
   } visualization_options;
 };
 
@@ -152,6 +156,13 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
     ROS2_PARAM_CLAUSE(node, visualization_options, prefix, raw_points, bool);
     ROS2_PARAM_CLAUSE(node, visualization_options, prefix, sampled_points, bool);
     ROS2_PARAM_CLAUSE(node, visualization_options, prefix, map_points, bool);
+
+    std::vector<double> T_sr_vec;
+    ROS2_PARAM_NO_LOG(node, T_sr_vec, prefix, T_sr_vec, std::vector<double>);
+    if (T_sr_vec.size() != 6) throw std::invalid_argument{"T_sr malformed. Must be 6 elements!"};
+    visualization_options.T_sr = lgmath::se3::vec2tran(Eigen::Matrix<double, 6, 1>(T_sr_vec.data()));
+    LOG(INFO) << "Parameter " << prefix + "T_sr"
+              << " = " << visualization_options.T_sr << std::endl;
   }
 
   /// dataset options
@@ -324,12 +335,22 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       if (qc_inv_diag.size() != 6) throw std::invalid_argument{"Qc diagonal malformed. Must be 6 elements!"};
       steam.qc_inv.diagonal() << qc_inv_diag[0], qc_inv_diag[1], qc_inv_diag[2], qc_inv_diag[3], qc_inv_diag[4],
           qc_inv_diag[5];
+      LOG(INFO) << "Parameter " << prefix + "qc_inv_diag"
+                << " = " << steam.qc_inv.diagonal() << std::endl;
+
+      std::vector<double> T_sr_vec;
+      ROS2_PARAM_NO_LOG(node, T_sr_vec, prefix, T_sr_vec, std::vector<double>);
+      if (T_sr_vec.size() != 6) throw std::invalid_argument{"T_sr malformed. Must be 6 elements!"};
+      steam.T_sr = lgmath::se3::vec2tran(Eigen::Matrix<double, 6, 1>(T_sr_vec.data()));
+      LOG(INFO) << "Parameter " << prefix + "T_sr"
+                << " = " << steam.T_sr << std::endl;
 
       ROS2_PARAM_CLAUSE(node, steam, prefix, lock_prev_pose, bool);
       ROS2_PARAM_CLAUSE(node, steam, prefix, lock_prev_vel, bool);
       ROS2_PARAM_CLAUSE(node, steam, prefix, prev_pose_as_prior, bool);
       ROS2_PARAM_CLAUSE(node, steam, prefix, prev_vel_as_prior, bool);
       ROS2_PARAM_CLAUSE(node, steam, prefix, max_iterations, int);
+      ROS2_PARAM_CLAUSE(node, steam, prefix, num_threads, int);
     }
   }
 
@@ -358,12 +379,13 @@ int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
   auto node = rclcpp::Node::make_shared("ct_icp_slam");
   auto odometry_publisher = node->create_publisher<nav_msgs::msg::Odometry>("/ct_icp_odometry", 10);
+  auto tf_static_bc = std::make_shared<tf2_ros::StaticTransformBroadcaster>(node);
   auto tf_bc = std::make_shared<tf2_ros::TransformBroadcaster>(node);
   auto raw_points_publisher = node->create_publisher<sensor_msgs::msg::PointCloud2>("/ct_icp_raw", 2);
   auto sampled_points_publisher = node->create_publisher<sensor_msgs::msg::PointCloud2>("/ct_icp_sampled", 2);
   auto map_points_publisher = node->create_publisher<sensor_msgs::msg::PointCloud2>("/ct_icp_map", 2);
 
-  auto to_pc2_msg = [](const auto &points, const std::string &frame_id = "world") {
+  auto to_pc2_msg = [](const auto &points, const std::string &frame_id = "map") {
     pcl::PointCloud<PCLPoint3D> points_pcl;
     points_pcl.reserve(points.size());
     for (auto &pt : points) points_pcl.emplace_back(pt);
@@ -383,6 +405,12 @@ int main(int argc, char **argv) {
 
   // Read parameters
   const auto options = ct_icp::load_options(node);
+
+  // Publish sensor vehicle transformations
+  auto T_rs_msg = tf2::eigenToTransform(Eigen::Affine3d(options.visualization_options.T_sr.inverse()));
+  T_rs_msg.header.frame_id = "vehicle";
+  T_rs_msg.child_frame_id = "lidar";
+  tf_static_bc->sendTransform(T_rs_msg);
 
   // Build the Output_dir
   if (!fs::exists(options.dataset_options.root_path))
@@ -465,31 +493,32 @@ int main(int argc, char **argv) {
         Eigen::Matrix4d T_ws = Eigen::Matrix4d::Identity();
         T_ws.block<3, 3>(0, 0) = summary.frame.begin_R;
         T_ws.block<3, 1>(0, 3) = summary.frame.begin_t;
+        Eigen::Matrix4d T_wr = T_ws * options.visualization_options.T_sr;
 
         /// odometry
         nav_msgs::msg::Odometry odometry;
-        odometry.header.frame_id = "world";
+        odometry.header.frame_id = "map";
         // odometry.header.stamp = rclcpp::Time(stamp);
-        odometry.pose.pose = tf2::toMsg(Eigen::Affine3d(T_ws));
+        odometry.pose.pose = tf2::toMsg(Eigen::Affine3d(T_wr));
         odometry_publisher->publish(odometry);
 
         /// tf
-        auto T_ws_msg = tf2::eigenToTransform(Eigen::Affine3d(T_ws));
-        T_ws_msg.header.frame_id = "world";
-        // T_ws_msg.header.stamp = rclcpp::Time(stamp);
-        T_ws_msg.child_frame_id = "lidar";
-        tf_bc->sendTransform(T_ws_msg);
+        auto T_wr_msg = tf2::eigenToTransform(Eigen::Affine3d(T_wr));
+        T_wr_msg.header.frame_id = "map";
+        // T_wr_msg.header.stamp = rclcpp::Time(stamp);
+        T_wr_msg.child_frame_id = "vehicle";
+        tf_bc->sendTransform(T_wr_msg);
       }
       if (options.visualization_options.sampled_points) {
         /// sampled points
         auto &sampled_points = summary.corrected_points;
-        auto sampled_points_msg = to_pc2_msg(sampled_points, "world");
+        auto sampled_points_msg = to_pc2_msg(sampled_points, "map");
         sampled_points_publisher->publish(sampled_points_msg);
       }
       if (options.visualization_options.map_points) {
         /// map points
         auto map_points = ct_icp_odometry.GetLocalMap();
-        auto map_points_msg = to_pc2_msg(map_points, "world");
+        auto map_points_msg = to_pc2_msg(map_points, "map");
         map_points_publisher->publish(map_points_msg);
       }
 

@@ -134,12 +134,14 @@ namespace ct_icp {
 
         /* ---------------------------------------------------------------------------------------------------------- */
         struct {
+            Eigen::Matrix<double, 4, 4> T_sr = Eigen::Matrix<double, 4, 4>::Identity();
             Eigen::Matrix<double, 6, 6> qc_inv = Eigen::Matrix<double, 6, 6>::Identity();
             bool lock_prev_pose = false;
             bool lock_prev_vel = false;
             bool prev_pose_as_prior = false;
             bool prev_vel_as_prior = false;
             int max_iterations = 1;
+            unsigned int num_threads = 1;
         } steam;
     };
 

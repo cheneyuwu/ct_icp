@@ -1010,18 +1010,24 @@ namespace ct_icp {
         using namespace steam::traj;
         using namespace steam::vspace;
 
+        /// Create robot to sensor transform variable, fixed.
+        const auto T_sr_var = SE3StateVar::MakeShared(lgmath::se3::Transformation(options.steam.T_sr));
+        T_sr_var->locked() = true;
+
         // prev trajectory for initialization of velocity
         // first state
         Time begin_time(static_cast<double>(trajectory[index_frame].begin_timestamp));
-        Eigen::Matrix4d begin_T_mr = Eigen::Matrix4d::Identity();
-        begin_T_mr.block(0, 0, 3, 3) = trajectory[index_frame].begin_R;
-        begin_T_mr.block(0, 3, 3, 1) = trajectory[index_frame].begin_t;
+        Eigen::Matrix4d begin_T_ms = Eigen::Matrix4d::Identity();
+        begin_T_ms.block(0, 0, 3, 3) = trajectory[index_frame].begin_R;
+        begin_T_ms.block(0, 3, 3, 1) = trajectory[index_frame].begin_t;
+        lgmath::se3::Transformation begin_T_rm = lgmath::se3::Transformation(Eigen::Matrix4d(begin_T_ms * options.steam.T_sr)).inverse();
         Eigen::Matrix<double, 6, 1> begin_w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
         // last state
         Time end_time(static_cast<double>(trajectory[index_frame].end_timestamp));
-        Eigen::Matrix4d end_T_mr = Eigen::Matrix4d::Identity();
-        end_T_mr.block(0, 0, 3, 3) = trajectory[index_frame].end_R;
-        end_T_mr.block(0, 3, 3, 1) = trajectory[index_frame].end_t;
+        Eigen::Matrix4d end_T_ms = Eigen::Matrix4d::Identity();
+        end_T_ms.block(0, 0, 3, 3) = trajectory[index_frame].end_R;
+        end_T_ms.block(0, 3, 3, 1) = trajectory[index_frame].end_t;
+        lgmath::se3::Transformation end_T_rm = lgmath::se3::Transformation(Eigen::Matrix4d(end_T_ms * options.steam.T_sr)).inverse();
         Eigen::Matrix<double, 6, 1> end_w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
 
         // use previous trajectory to initialize velocity
@@ -1060,13 +1066,13 @@ namespace ct_icp {
         std::cout << "[CT_ICP_STEAM] begin_timestamp: " << trajectory[index_frame].begin_timestamp << std::endl;
         std::cout << "[CT_ICP_STEAM] end_timestamp: " << trajectory[index_frame].end_timestamp << std::endl;
 
-        auto begin_T_rm_var = SE3StateVar::MakeShared(lgmath::se3::Transformation(begin_T_mr).inverse());
+        auto begin_T_rm_var = SE3StateVar::MakeShared(begin_T_rm);
         auto begin_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(begin_w_mr_inr);
         steam_trajectory->add(begin_time, begin_T_rm_var, begin_w_mr_inr_var);
         steam_state_vars.emplace_back(begin_T_rm_var);
         steam_state_vars.emplace_back(begin_w_mr_inr_var);
 
-        auto end_T_rm_var = SE3StateVar::MakeShared(lgmath::se3::Transformation(end_T_mr).inverse());
+        auto end_T_rm_var = SE3StateVar::MakeShared(end_T_rm);
         auto end_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(end_w_mr_inr);
         steam_trajectory->add(end_time, end_T_rm_var, end_w_mr_inr_var);
         steam_state_vars.emplace_back(end_T_rm_var);
@@ -1093,7 +1099,7 @@ namespace ct_icp {
             number_keypoints_used = 0;
 
             // initialize problem
-            OptimizationProblem problem(/* num_threads */ 8);
+            OptimizationProblem problem(/* num_threads */ options.steam.num_threads);
 
             // add variables
             for (const auto &var : steam_state_vars)
@@ -1166,8 +1172,8 @@ namespace ct_icp {
 
                     const auto qry_time = trajectory[index_frame].begin_timestamp + alpha_timestamp * (trajectory[index_frame].end_timestamp - trajectory[index_frame].begin_timestamp);
                     const auto T_rm_intp_eval = steam_trajectory->getPoseInterpolator(Time(qry_time));
-                    const auto T_mr_intp_eval = inverse(T_rm_intp_eval);
-                    auto error_func = p2p::p2pError(T_mr_intp_eval, closest_point, keypoint.raw_pt);
+                    const auto T_ms_intp_eval = inverse(compose(T_sr_var, T_rm_intp_eval));
+                    auto error_func = p2p::p2pError(T_ms_intp_eval, closest_point, keypoint.raw_pt);
 
                     // create cost term and add to problem
                     auto cost = WeightedLeastSqCostTerm<3>::MakeShared(error_func, noise_model, loss_func);
@@ -1213,16 +1219,18 @@ namespace ct_icp {
             auto &current_estimate = trajectory[index_frame];
 
             const auto begin_T_mr = inverse(steam_trajectory->getPoseInterpolator(begin_time))->evaluate().matrix();
-            diff_trans += (current_estimate.begin_t - begin_T_mr.block<3, 1>(0, 3)).norm();
-            diff_rot += AngularDistance(current_estimate.begin_R, begin_T_mr.block<3, 3>(0, 0));
-            current_estimate.begin_R = begin_T_mr.block<3, 3>(0, 0);
-            current_estimate.begin_t = begin_T_mr.block<3, 1>(0, 3);
+            begin_T_ms = begin_T_mr * options.steam.T_sr.inverse();
+            diff_trans += (current_estimate.begin_t - begin_T_ms.block<3, 1>(0, 3)).norm();
+            diff_rot += AngularDistance(current_estimate.begin_R, begin_T_ms.block<3, 3>(0, 0));
+            current_estimate.begin_R = begin_T_ms.block<3, 3>(0, 0);
+            current_estimate.begin_t = begin_T_ms.block<3, 1>(0, 3);
 
             const auto end_T_mr = inverse(steam_trajectory->getPoseInterpolator(end_time))->evaluate().matrix();
-            diff_trans += (current_estimate.end_t - end_T_mr.block<3, 1>(0, 3)).norm();
-            diff_rot += AngularDistance(current_estimate.end_R, end_T_mr.block<3, 3>(0, 0));
-            current_estimate.end_R = end_T_mr.block<3, 3>(0, 0);
-            current_estimate.end_t = end_T_mr.block<3, 1>(0, 3);
+            end_T_ms = end_T_mr * options.steam.T_sr.inverse();
+            diff_trans += (current_estimate.end_t - end_T_ms.block<3, 1>(0, 3)).norm();
+            diff_rot += AngularDistance(current_estimate.end_R, end_T_ms.block<3, 3>(0, 0));
+            current_estimate.end_R = end_T_ms.block<3, 3>(0, 0);
+            current_estimate.end_t = end_T_ms.block<3, 1>(0, 3);
 
             current_estimate.steam_traj = steam_trajectory;
             try {
@@ -1246,9 +1254,9 @@ namespace ct_icp {
                 const auto qry_time = trajectory[index_frame].begin_timestamp +
                                       keypoint.alpha_timestamp * (trajectory[index_frame].end_timestamp - trajectory[index_frame].begin_timestamp);
                 const auto T_rm_intp_eval = steam_trajectory->getPoseInterpolator(Time(qry_time));
-                const auto T_mr_intp_eval = inverse(T_rm_intp_eval);
-                const auto T_mr = T_mr_intp_eval->evaluate().matrix();
-                keypoint.pt = T_mr.block<3, 3>(0, 0) * keypoint.raw_pt + T_mr.block<3, 1>(0, 3);
+                const auto T_ms_intp_eval = inverse(compose(T_sr_var, T_rm_intp_eval));
+                const auto T_ms = T_ms_intp_eval->evaluate().matrix();
+                keypoint.pt = T_ms.block<3, 3>(0, 0) * keypoint.raw_pt + T_ms.block<3, 1>(0, 3);
             }
 
             auto update_step = std::chrono::steady_clock::now();
