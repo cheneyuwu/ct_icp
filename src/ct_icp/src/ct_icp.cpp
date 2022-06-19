@@ -11,6 +11,7 @@
 
 #include "ct_icp.hpp"
 #include "cost_functions.h"
+#include "Utilities/stopwatch.hpp"
 
 #ifdef CT_ICP_WITH_VIZ
 
@@ -742,13 +743,18 @@ namespace ct_icp {
         AType A;
         bType b;
 
-        // TODO Remove chronos
-        double elapsed_search_neighbors = 0.0;
-        double elapsed_select_closest_neighbors = 0.0;
-        double elapsed_normals = 0.0;
-        double elapsed_A_construction = 0.0;
-        double elapsed_solve = 0.0;
-        double elapsed_update = 0.0;
+        // timers
+        using Stopwatch = timing::Stopwatch<>;
+        std::vector<std::pair<std::string, std::unique_ptr<Stopwatch>>> timer;
+        timer.emplace_back("Association .................... ", std::make_unique<Stopwatch>(false));
+        timer.emplace_back("Optimization ................... ", std::make_unique<Stopwatch>(false));
+        timer.emplace_back("Update Transform ............... ", std::make_unique<Stopwatch>(false));
+        timer.emplace_back("Alignment ...................... ", std::make_unique<Stopwatch>(false));
+        std::vector<std::pair<std::string, std::unique_ptr<Stopwatch>>> inner_timer;
+        inner_timer.emplace_back("Search Neighbors ............. ", std::make_unique<Stopwatch>(false));
+        inner_timer.emplace_back("Compute Normal ............... ", std::make_unique<Stopwatch>(false));
+        inner_timer.emplace_back("Add Cost Term ................ ", std::make_unique<Stopwatch>(false));
+        bool innerloop_time = (options.steam.num_threads == 1);
 
         ICPSummary summary;
 
@@ -761,26 +767,26 @@ namespace ct_icp {
             double total_scalar = 0;
             double mean_scalar = 0.0;
 
+            timer[0].second->start();
+
+#pragma omp parallel for num_threads(options.steam.num_threads)
             for (auto &keypoint: keypoints) {
-                auto start = std::chrono::steady_clock::now();
                 auto &pt_keypoint = keypoint.pt;
+
+                if (innerloop_time) inner_timer[0].second->start();
 
                 // Neighborhood search
                 ArrayVector3d vector_neighbors = search_neighbors(voxels_map, pt_keypoint,
                                                                   nb_voxels_visited, options.size_voxel_map,
                                                                   options.max_number_neighbors);
-                auto step1 = std::chrono::steady_clock::now();
-                std::chrono::duration<double> _elapsed_search_neighbors = step1 - start;
-                elapsed_search_neighbors += _elapsed_search_neighbors.count() * 1000.0;
 
+                if (innerloop_time) inner_timer[0].second->stop();
 
                 if (vector_neighbors.size() < kMinNumNeighbors) {
                     continue;
                 }
 
-                auto step2 = std::chrono::steady_clock::now();
-                std::chrono::duration<double> _elapsed_neighbors_selection = step2 - step1;
-                elapsed_select_closest_neighbors += _elapsed_neighbors_selection.count() * 1000.0;
+                if (innerloop_time) inner_timer[1].second->start();
 
                 // Compute normals from neighbors
                 auto neighborhood = compute_neighborhood_distribution(vector_neighbors);
@@ -802,9 +808,9 @@ namespace ct_icp {
                                        normal[1] * (pt_keypoint[1] - closest_point[1]) +
                                        normal[2] * (pt_keypoint[2] - closest_point[2]);
 
-                auto step3 = std::chrono::steady_clock::now();
-                std::chrono::duration<double> _elapsed_normals = step3 - step2;
-                elapsed_normals += _elapsed_normals.count() * 1000.0;
+                if (innerloop_time) inner_timer[1].second->stop();
+
+                if (innerloop_time) inner_timer[2].second->start();
 
                 // std::cout << "dist_to_plane : " << dist_to_plane << std::endl;
 
@@ -813,10 +819,6 @@ namespace ct_icp {
                     double scalar = closest_pt_normal[0] * (pt_keypoint[0] - closest_point[0]) +
                                     closest_pt_normal[1] * (pt_keypoint[1] - closest_point[1]) +
                                     closest_pt_normal[2] * (pt_keypoint[2] - closest_point[2]);
-                    total_scalar = total_scalar + scalar * scalar;
-                    mean_scalar = mean_scalar + fabs(scalar);
-                    number_keypoints_used++;
-
 
                     Eigen::Vector3d frame_idx_previous_origin_begin =
                             trajectory[index_frame].begin_R * keypoint.raw_pt;
@@ -850,17 +852,22 @@ namespace ct_icp {
 
                     Eigen::VectorXd u(12);
                     u << cbx, cby, cbz, nbx, nby, nbz, cex, cey, cez, nex, ney, nez;
-                    for (int i = 0; i < 12; i++) {
-                        for (int j = 0; j < 12; j++) {
-                            A(i, j) = A(i, j) + u[i] * u[j];
+
+#pragma omp critical(odometry_cost_term)
+                    {
+                        for (int i = 0; i < 12; i++) {
+                            for (int j = 0; j < 12; j++) {
+                                A(i, j) = A(i, j) + u[i] * u[j];
+                            }
+                            b(i) = b(i) - u[i] * scalar;
                         }
-                        b(i) = b(i) - u[i] * scalar;
+
+                        total_scalar = total_scalar + scalar * scalar;
+                        mean_scalar = mean_scalar + fabs(scalar);
+                        number_keypoints_used++;
                     }
 
-
-                    auto step4 = std::chrono::steady_clock::now();
-                    std::chrono::duration<double> _elapsed_A = step4 - step3;
-                    elapsed_search_neighbors += _elapsed_A.count() * 1000.0;
+                    if (innerloop_time) inner_timer[2].second->stop();
                 }
             }
 
@@ -878,7 +885,7 @@ namespace ct_icp {
                 return summary;
             }
 
-            auto start = std::chrono::steady_clock::now();
+            timer[1].second->start();
 
 
             // Normalize equation
@@ -948,15 +955,18 @@ namespace ct_icp {
             rotation_end(2, 2) = cos(beta_end) * cos(alpha_end);
             Eigen::Vector3d translation_end = Eigen::Vector3d(x_bundle(9), x_bundle(10), x_bundle(11));
 
+            timer[1].second->stop();
+
+            timer[2].second->start();
+
             trajectory[index_frame].begin_R = rotation_begin * trajectory[index_frame].begin_R;
             trajectory[index_frame].begin_t = trajectory[index_frame].begin_t + translation_begin;
             trajectory[index_frame].end_R = rotation_end * trajectory[index_frame].end_R;
             trajectory[index_frame].end_t = trajectory[index_frame].end_t + translation_end;
 
-            auto solve_step = std::chrono::steady_clock::now();
-            std::chrono::duration<double> _elapsed_solve = solve_step - start;
-            elapsed_solve += _elapsed_solve.count() * 1000.0;
+            timer[2].second->stop();
 
+            timer[3].second->start();
 
             //Update keypoints
             for (auto &keypoint: keypoints) {
@@ -971,10 +981,8 @@ namespace ct_icp {
                 Eigen::Vector3d t = (1.0 - alpha_timestamp) * t_begin + alpha_timestamp * t_end;
                 keypoint.pt = R * keypoint.raw_pt + t;
             }
-            auto update_step = std::chrono::steady_clock::now();
-            std::chrono::duration<double> _elapsed_update = update_step - solve_step;
-            elapsed_update += _elapsed_update.count() * 1000.0;
 
+            timer[3].second->stop();
 
             if ((index_frame > 1) && (x_bundle.norm() < options.threshold_orientation_norm)) {
                 summary.success = true;
@@ -985,12 +993,10 @@ namespace ct_icp {
         }
 
         if (options.debug_print) {
-            std::cout << "Elapsed Normals: " << elapsed_normals << std::endl;
-            std::cout << "Elapsed Search Neighbors: " << elapsed_search_neighbors << std::endl;
-            std::cout << "Elapsed A Construction: " << elapsed_A_construction << std::endl;
-            std::cout << "Elapsed Select closest: " << elapsed_select_closest_neighbors << std::endl;
-            std::cout << "Elapsed Solve: " << elapsed_solve << std::endl;
-            std::cout << "Elapsed Solve: " << elapsed_update << std::endl;
+            for (size_t i = 0; i < timer.size(); i++)
+                std::cout << "Elapsed " << timer[i].first << *(timer[i].second) << std::endl;
+            for (size_t i = 0; i < inner_timer.size(); i++)
+                std::cout << "Elapsed (Inner Loop) " << inner_timer[i].first << *(inner_timer[i].second) << std::endl;
             std::cout << "Number iterations CT-ICP : " << options.num_iters_icp << std::endl;
             std::cout << "Translation Begin: " << trajectory[index_frame].begin_t.transpose() << std::endl;
             std::cout << "Translation End: " << trajectory[index_frame].end_t.transpose() << std::endl;
@@ -1083,13 +1089,18 @@ namespace ct_icp {
         int number_keypoints_used = 0;
         const int kMinNumNeighbors = options.min_number_neighbors;
 
-        // TODO Remove chronos
-        double elapsed_search_neighbors = 0.0;
-        double elapsed_select_closest_neighbors = 0.0;
-        double elapsed_normals = 0.0;
-        double elapsed_A_construction = 0.0;
-        double elapsed_solve = 0.0;
-        double elapsed_update = 0.0;
+        // timers
+        using Stopwatch = timing::Stopwatch<>;
+        std::vector<std::pair<std::string, std::unique_ptr<Stopwatch>>> timer;
+        timer.emplace_back("Association .................... ", std::make_unique<Stopwatch>(false));
+        timer.emplace_back("Optimization ................... ", std::make_unique<Stopwatch>(false));
+        timer.emplace_back("Update Transform ............... ", std::make_unique<Stopwatch>(false));
+        timer.emplace_back("Alignment ...................... ", std::make_unique<Stopwatch>(false));
+        std::vector<std::pair<std::string, std::unique_ptr<Stopwatch>>> inner_timer;
+        inner_timer.emplace_back("Search Neighbors ............. ", std::make_unique<Stopwatch>(false));
+        inner_timer.emplace_back("Compute Normal ............... ", std::make_unique<Stopwatch>(false));
+        inner_timer.emplace_back("Add Cost Term ................ ", std::make_unique<Stopwatch>(false));
+        bool innerloop_time = (options.steam.num_threads == 1);
 
         ICPSummary summary;
 
@@ -1111,26 +1122,26 @@ namespace ct_icp {
             // shared loss function
             auto loss_func = L2LossFunc::MakeShared();
 
+            timer[0].second->start();
+
+#pragma omp parallel for num_threads(options.steam.num_threads)
             for (auto &keypoint: keypoints) {
-                auto start = std::chrono::steady_clock::now();
                 auto &pt_keypoint = keypoint.pt;
+
+                if (innerloop_time) inner_timer[0].second->start();
 
                 // Neighborhood search
                 ArrayVector3d vector_neighbors = search_neighbors(voxels_map, pt_keypoint,
                                                                   nb_voxels_visited, options.size_voxel_map,
                                                                   options.max_number_neighbors);
-                auto step1 = std::chrono::steady_clock::now();
-                std::chrono::duration<double> _elapsed_search_neighbors = step1 - start;
-                elapsed_search_neighbors += _elapsed_search_neighbors.count() * 1000.0;
 
+                if (innerloop_time) inner_timer[0].second->stop();
 
                 if (vector_neighbors.size() < kMinNumNeighbors) {
                     continue;
                 }
 
-                auto step2 = std::chrono::steady_clock::now();
-                std::chrono::duration<double> _elapsed_neighbors_selection = step2 - step1;
-                elapsed_select_closest_neighbors += _elapsed_neighbors_selection.count() * 1000.0;
+                if (innerloop_time) inner_timer[1].second->start();
 
                 // Compute normals from neighbors
                 auto neighborhood = compute_neighborhood_distribution(vector_neighbors);
@@ -1152,16 +1163,11 @@ namespace ct_icp {
                                        normal[1] * (pt_keypoint[1] - closest_point[1]) +
                                        normal[2] * (pt_keypoint[2] - closest_point[2]);
 
-                auto step3 = std::chrono::steady_clock::now();
-                std::chrono::duration<double> _elapsed_normals = step3 - step2;
-                elapsed_normals += _elapsed_normals.count() * 1000.0;
+                if (innerloop_time) inner_timer[1].second->stop();
 
-                // std::cout << "dist_to_plane : " << dist_to_plane << std::endl;
+                if (innerloop_time) inner_timer[2].second->start();
 
                 if (fabs(dist_to_plane) < options.max_dist_to_plane_ct_icp) {
-
-                    number_keypoints_used++;
-
                     Eigen::Matrix3d W = (closest_pt_normal * closest_pt_normal.transpose() + 1e-5 * Eigen::Matrix3d::Identity());
                     // std::cout << closest_pt_normal.transpose() << std::endl;
                     auto noise_model = StaticNoiseModel<3>::MakeShared(W, NoiseType::INFORMATION);
@@ -1177,14 +1183,19 @@ namespace ct_icp {
 
                     // create cost term and add to problem
                     auto cost = WeightedLeastSqCostTerm<3>::MakeShared(error_func, noise_model, loss_func);
-                    problem.addCostTerm(cost);
 
-                    auto step4 = std::chrono::steady_clock::now();
-                    std::chrono::duration<double> _elapsed_A = step4 - step3;
-                    elapsed_search_neighbors += _elapsed_A.count() * 1000.0;
+#pragma omp critical(odometry_cost_term)
+                    {
+                        problem.addCostTerm(cost);
+
+                        number_keypoints_used++;
+                    }
                 }
+
+                if (innerloop_time) inner_timer[2].second->stop();
             }
 
+            timer[0].second->stop();
 
             if (number_keypoints_used < 100) {
                 std::stringstream ss_out;
@@ -1199,7 +1210,7 @@ namespace ct_icp {
                 return summary;
             }
 
-            auto start = std::chrono::steady_clock::now();
+            timer[1].second->start();
 
             //Solve
             using SolverType = VanillaGaussNewtonSolver;
@@ -1212,6 +1223,10 @@ namespace ct_icp {
             } catch (const decomp_failure &) {
                 std::cout << "Steam optimization failed!" << std::endl;
             }
+
+            timer[1].second->stop();
+
+            timer[2].second->start();
 
             //Update (changes trajectory data)
             double diff_trans = 0, diff_rot = 0;
@@ -1244,10 +1259,9 @@ namespace ct_icp {
                 std::cout << "Steam optimization failed! (Cannot query covariance)" << std::endl;
             }
 
-            auto solve_step = std::chrono::steady_clock::now();
-            std::chrono::duration<double> _elapsed_solve = solve_step - start;
-            elapsed_solve += _elapsed_solve.count() * 1000.0;
+            timer[2].second->stop();
 
+            timer[3].second->start();
 
             //Update keypoints
             for (auto &keypoint: keypoints) {
@@ -1259,9 +1273,7 @@ namespace ct_icp {
                 keypoint.pt = T_ms.block<3, 3>(0, 0) * keypoint.raw_pt + T_ms.block<3, 1>(0, 3);
             }
 
-            auto update_step = std::chrono::steady_clock::now();
-            std::chrono::duration<double> _elapsed_update = update_step - solve_step;
-            elapsed_update += _elapsed_update.count() * 1000.0;
+            timer[3].second->stop();
 
             // std::cout << "Difference: diff_rot=" << diff_rot << ", diff_trans=" << diff_trans << std::endl;
             if ((index_frame > 1) && (diff_rot < options.threshold_orientation_norm &&
@@ -1278,12 +1290,10 @@ namespace ct_icp {
         }
 
         if (options.debug_print) {
-            std::cout << "Elapsed Normals: " << elapsed_normals << std::endl;
-            std::cout << "Elapsed Search Neighbors: " << elapsed_search_neighbors << std::endl;
-            std::cout << "Elapsed A Construction: " << elapsed_A_construction << std::endl;
-            std::cout << "Elapsed Select closest: " << elapsed_select_closest_neighbors << std::endl;
-            std::cout << "Elapsed Solve: " << elapsed_solve << std::endl;
-            std::cout << "Elapsed Solve: " << elapsed_update << std::endl;
+            for (size_t i = 0; i < timer.size(); i++)
+                std::cout << "Elapsed " << timer[i].first << *(timer[i].second) << std::endl;
+            for (size_t i = 0; i < inner_timer.size(); i++)
+                std::cout << "Elapsed (Inner Loop) " << inner_timer[i].first << *(inner_timer[i].second) << std::endl;
             std::cout << "Number iterations CT-ICP : " << options.num_iters_icp << std::endl;
             std::cout << "Translation Begin: " << trajectory[index_frame].begin_t.transpose() << std::endl;
             std::cout << "Translation End: " << trajectory[index_frame].end_t.transpose() << std::endl;
