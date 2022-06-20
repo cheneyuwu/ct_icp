@@ -1,14 +1,14 @@
 /**:
   ros__parameters:
-    log_dir: /tmp/ct_icp_slam
+    log_dir: /home/yuchen/ASRL/temp/doppler_odometry/boreas/aeva/elastic
 
     # SLAM OPTIONS ----
     max_num_threads: 1
     save_trajectory: true
     suspend_on_failure: false
-    output_dir: /home/yuchen/ASRL/temp/cticp/boreas/aeva/steam_temp
-    all_sequences: false
-    sequence: "boreas-2022-05-13-10-30" # Ignored if use_all_sequences is true
+    output_dir: /home/yuchen/ASRL/temp/doppler_odometry/boreas/aeva/elastic
+    all_sequences: true
+    sequence: "" # Ignored if use_all_sequences is true
     start_index: 0 # The initial frame index for the given sequence
     max_frames: -1 # For negative values, all frames are computed
     display_debug: false
@@ -21,7 +21,7 @@
       raw_points: true
       sampled_points: true
       map_points: true
-      T_sr_vec: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+      T_sr_vec: [-0.835, -0.39, 0.103, 0.0, 0.0, 0.0]  # davids result without side slip
 
     # DATASET OPTIONS ----
     dataset_options:
@@ -61,7 +61,7 @@
         beta_location_consistency: 0.001
         beta_constant_velocity: 0.001
 
-        solver: STEAM # Options: [GN=Gauss-Newton, CERES, STEAM]
+        solver: GN # Options: [GN=Gauss-Newton, CERES, STEAM]
         loss_function: HUBER # Options: [STANDARD, CAUCHY, HUBER, TOLERANT, TRUNCATED] (for CERES solver)
         ls_max_num_iters: 1 # The number of steps performed for each iteration of the ICP (for CERES solver)
         ls_num_threads: 16 # The number of threads to build and solve the least square system (for CERES solver)
@@ -69,12 +69,12 @@
         ls_tolerant_min_threshold: 0.05 # The tolerant parameter for loss TOLERANT (for CERES solver)
 
         steam:
-          T_sr_vec: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+          T_sr_vec: [-0.835, -0.39, 0.103, 0.0, 0.0, 0.0]  # davids result without side slip
 
           qc_inv_diag: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
           lock_prev_pose: false
           lock_prev_vel: false
-          prev_pose_as_prior: true
+          prev_pose_as_prior: false
           prev_vel_as_prior: false
 
           use_rv: false
@@ -84,4 +84,4 @@
 
           verbose: false
           max_iterations: 1
-          num_threads: 1
+          num_threads: 10

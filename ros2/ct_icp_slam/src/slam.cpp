@@ -40,6 +40,7 @@ namespace ct_icp {
     struct {                 \
       float alpha_timestamp; \
       float timestamp;       \
+      float radial_velocity; \
     };                       \
   };
 
@@ -71,6 +72,7 @@ struct PCLPoint3D : public _PCLPoint3D {
     data[3] = 1.0f;
     alpha_timestamp = p.alpha_timestamp;
     timestamp = p.timestamp;
+    radial_velocity = p.radial_velocity;
   }
 
   inline PCLPoint3D(const Eigen::Vector3d &p) {
@@ -162,7 +164,8 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
     if (T_sr_vec.size() != 6) throw std::invalid_argument{"T_sr malformed. Must be 6 elements!"};
     visualization_options.T_sr = lgmath::se3::vec2tran(Eigen::Matrix<double, 6, 1>(T_sr_vec.data()));
     LOG(INFO) << "Parameter " << prefix + "T_sr"
-              << " = " << std::endl << visualization_options.T_sr << std::endl;
+              << " = " << std::endl
+              << visualization_options.T_sr << std::endl;
   }
 
   /// dataset options
@@ -330,6 +333,14 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       auto &steam = options.odometry_options.ct_icp_options.steam;
       prefix = "odometry_options.ct_icp_options.steam.";
 
+      std::vector<double> T_sr_vec;
+      ROS2_PARAM_NO_LOG(node, T_sr_vec, prefix, T_sr_vec, std::vector<double>);
+      if (T_sr_vec.size() != 6) throw std::invalid_argument{"T_sr malformed. Must be 6 elements!"};
+      steam.T_sr = lgmath::se3::vec2tran(Eigen::Matrix<double, 6, 1>(T_sr_vec.data()));
+      LOG(INFO) << "Parameter " << prefix + "T_sr"
+                << " = " << std::endl
+                << steam.T_sr << std::endl;
+
       std::vector<double> qc_inv_diag;
       ROS2_PARAM_NO_LOG(node, qc_inv_diag, prefix, qc_inv_diag, std::vector<double>);
       if (qc_inv_diag.size() != 6) throw std::invalid_argument{"Qc diagonal malformed. Must be 6 elements!"};
@@ -338,17 +349,16 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       LOG(INFO) << "Parameter " << prefix + "qc_inv_diag"
                 << " = " << steam.qc_inv.diagonal().transpose() << std::endl;
 
-      std::vector<double> T_sr_vec;
-      ROS2_PARAM_NO_LOG(node, T_sr_vec, prefix, T_sr_vec, std::vector<double>);
-      if (T_sr_vec.size() != 6) throw std::invalid_argument{"T_sr malformed. Must be 6 elements!"};
-      steam.T_sr = lgmath::se3::vec2tran(Eigen::Matrix<double, 6, 1>(T_sr_vec.data()));
-      LOG(INFO) << "Parameter " << prefix + "T_sr"
-                << " = " << std::endl << steam.T_sr << std::endl;
-
       ROS2_PARAM_CLAUSE(node, steam, prefix, lock_prev_pose, bool);
       ROS2_PARAM_CLAUSE(node, steam, prefix, lock_prev_vel, bool);
       ROS2_PARAM_CLAUSE(node, steam, prefix, prev_pose_as_prior, bool);
       ROS2_PARAM_CLAUSE(node, steam, prefix, prev_vel_as_prior, bool);
+
+      ROS2_PARAM_CLAUSE(node, steam, prefix, use_rv, bool);
+      ROS2_PARAM_CLAUSE(node, steam, prefix, merge_p2p_rv, bool);
+      ROS2_PARAM_CLAUSE(node, steam, prefix, rv_cov_inv, double);
+      ROS2_PARAM_CLAUSE(node, steam, prefix, rv_loss_threshold, double);
+
       ROS2_PARAM_CLAUSE(node, steam, prefix, verbose, bool);
       ROS2_PARAM_CLAUSE(node, steam, prefix, max_iterations, int);
       ROS2_PARAM_CLAUSE(node, steam, prefix, num_threads, int);

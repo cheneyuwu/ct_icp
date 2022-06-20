@@ -24,7 +24,6 @@ def pose2tfstamped(pose, stamp, to_frame, from_frame):
   rot = sptf.Rotation.from_matrix(pose[:3, :3]).as_quat()
 
   tfs = geometry_msgs.TransformStamped()
-  # The default (fixed) frame in RViz is called 'world'
   tfs.header.frame_id = to_frame
   tfs.header.stamp = stamp
   tfs.child_frame_id = from_frame
@@ -211,14 +210,16 @@ def main(args=None):
   node = Node("boreas_plotter")
 
   # seq = 'boreas-2022-05-13-09-23'
-  # seq = 'boreas-2022-05-13-10-30'
-  seq = 'boreas-2022-05-13-11-47'
-  # dataset_dir = '/home/yuchen/ASRL/data/BOREAS'
+  seq = 'boreas-2022-05-13-10-30'
+  # seq = 'boreas-2022-05-13-11-47'
+
   dataset_dir = '/home/yuchen/ASRL/data/boreas/sequences'
-  sensor = "lidar"
+  sensor = "aeva"
+
   result_dirs = [
-    osp.join("/media/yuchen/T7/ASRL/temp/boreas", sensor, seq + ".icp", "odometry_result"),
-    osp.join("/home/yuchen/ASRL/temp/cticp/boreas", sensor, "elastic/boreas_odometry_result"),
+    osp.join("/home/yuchen/ASRL/temp/doppler_odometry/boreas", sensor, "doppler_icp/boreas_odometry_result"),
+    # osp.join("/home/yuchen/ASRL/temp/doppler_odometry/boreas", sensor, "elastic/boreas_odometry_result"),
+    # osp.join("/home/yuchen/ASRL/temp/doppler_odometry/boreas", sensor, "steam/boreas_odometry_result"),
   ]
 
   T_applanix_sensor = np.loadtxt(osp.join(dataset_dir, seq, 'calib', 'T_applanix_' + sensor + '.txt'))
@@ -229,7 +230,7 @@ def main(args=None):
     gt_T_a0_at_list.append(T_aw_list[0] @ get_inverse_tf(T_aw))
 
   gt_T_a0_at_list_sampled = gt_T_a0_at_list[::10]  # downsample
-  path = poses2path(gt_T_a0_at_list_sampled, Time(seconds=0).to_msg(), 'world')
+  path = poses2path(gt_T_a0_at_list_sampled, Time(seconds=0).to_msg(), 'map')
   ground_truth_path_publisher = node.create_publisher(nav_msgs.Path, '/ground_truth_path', 10)
   ground_truth_path_publisher.publish(path)
 
@@ -248,12 +249,12 @@ def main(args=None):
       T_a0_at_list[j] = T_a0_w @ T_a0_at_list[j]
 
     # align to ground truth frame
-    T_gt_pred, _ = align_path(gt_T_a0_at_list[:500], T_a0_at_list[:500])
+    T_gt_pred, _ = align_path(gt_T_a0_at_list[::100], T_a0_at_list[::100])
     for j in range(len(T_a0_at_list)):
       T_a0_at_list[j] = T_gt_pred @ T_a0_at_list[j]
 
     T_a0_at_list_sampled = T_a0_at_list[::10]  # downsample
-    path = poses2path(T_a0_at_list_sampled, Time(seconds=0).to_msg(), 'world')
+    path = poses2path(T_a0_at_list_sampled, Time(seconds=0).to_msg(), 'map')
     result_path_publisher = node.create_publisher(nav_msgs.Path, '/result_path' + str(i), 10)
     result_path_publisher.publish(path)
 

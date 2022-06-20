@@ -447,7 +447,7 @@ namespace ct_icp {
             ++offset;
             // intensity skipped
             ++offset;
-            // radial velocity skipped for now
+            new_point.radial_velocity = getFloatFromByteArray(buffer.data(), bufpos + offset * float_offset);
             ++offset;
             new_point.alpha_timestamp = getFloatFromByteArray(buffer.data(), bufpos + offset * float_offset);
 

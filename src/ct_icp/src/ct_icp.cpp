@@ -1084,6 +1084,23 @@ namespace ct_icp {
         steam_state_vars.emplace_back(end_T_rm_var);
         steam_state_vars.emplace_back(end_w_mr_inr_var);
 
+        // Get evaluator for query points
+        std::vector<Evaluable<const_vel::Interface::PoseType>::ConstPtr> T_ms_intp_eval_vec;
+        std::vector<Evaluable<const_vel::Interface::VelocityType>::ConstPtr> w_ms_ins_intp_eval_vec;
+        T_ms_intp_eval_vec.reserve(keypoints.size());
+        for (auto &keypoint: keypoints) {
+            const auto qry_time = trajectory[index_frame].begin_timestamp +
+                                  keypoint.alpha_timestamp * (trajectory[index_frame].end_timestamp - trajectory[index_frame].begin_timestamp);
+            // pose
+            const auto T_rm_intp_eval = steam_trajectory->getPoseInterpolator(Time(qry_time));
+            const auto T_ms_intp_eval = inverse(compose(T_sr_var, T_rm_intp_eval));
+            T_ms_intp_eval_vec.emplace_back(T_ms_intp_eval);
+            // velocity
+            const auto w_mr_inr_intp_eval = steam_trajectory->getVelocityInterpolator(Time(qry_time));
+            const auto w_ms_ins_intp_eval = compose_velocity(T_sr_var, w_mr_inr_intp_eval);
+            w_ms_ins_intp_eval_vec.emplace_back(w_ms_ins_intp_eval);
+        }
+
         // For the 50 first frames, visit 2 voxels
         const short nb_voxels_visited = index_frame < options.init_num_frames ? 2 : 1;
         int number_keypoints_used = 0;
@@ -1119,13 +1136,11 @@ namespace ct_icp {
             // add prior cost terms
             steam_trajectory->addPriorCostTerms(problem);
 
-            // shared loss function
-            auto loss_func = L2LossFunc::MakeShared();
-
             timer[0].second->start();
 
 #pragma omp parallel for num_threads(options.steam.num_threads)
-            for (auto &keypoint: keypoints) {
+            for (/* auto &keypoint: keypoints */ int i = 0; i < keypoints.size(); i++) {
+                auto &keypoint = keypoints[i];
                 auto &pt_keypoint = keypoint.pt;
 
                 if (innerloop_time) inner_timer[0].second->start();
@@ -1167,28 +1182,69 @@ namespace ct_icp {
 
                 if (innerloop_time) inner_timer[2].second->start();
 
-                if (fabs(dist_to_plane) < options.max_dist_to_plane_ct_icp) {
-                    Eigen::Matrix3d W = (closest_pt_normal * closest_pt_normal.transpose() + 1e-5 * Eigen::Matrix3d::Identity());
-                    // std::cout << closest_pt_normal.transpose() << std::endl;
-                    auto noise_model = StaticNoiseModel<3>::MakeShared(W, NoiseType::INFORMATION);
+                bool use_p2p = (fabs(dist_to_plane) < options.max_dist_to_plane_ct_icp);
+                if (use_p2p) {
+                    /// \note query and reference point
+                    ///   const auto qry_pt = keypoint.raw_pt;
+                    ///   const auto ref_pt = closest_point;
+                    if (options.steam.use_rv && options.steam.merge_p2p_rv) {
+                        Eigen::Matrix4d W = Eigen::Matrix4d::Identity();
+                        W.block<3, 3>(0, 0) = (closest_pt_normal * closest_pt_normal.transpose() + 1e-5 * Eigen::Matrix3d::Identity());
+                        W.block<1, 1>(3, 3) = options.steam.rv_cov_inv * Eigen::Matrix<double, 1, 1>::Identity();
+                        const auto noise_model = StaticNoiseModel<4>::MakeShared(W, NoiseType::INFORMATION);
 
-                    // query and reference point
-                    /// const auto qry_pt = keypoint.raw_pt;
-                    /// const auto ref_pt = closest_point;
+                        const auto &T_ms_intp_eval = T_ms_intp_eval_vec[i];
+                        const auto &w_ms_ins_intp_eval = w_ms_ins_intp_eval_vec[i];
+                        const auto p2p_error = p2p::p2pError(T_ms_intp_eval, closest_point, keypoint.raw_pt);
+                        const auto rv_error = p2p::radialVelError(w_ms_ins_intp_eval, keypoint.raw_pt, keypoint.radial_velocity);
+                        const auto error_func = p2p::p2prvError(p2p_error, rv_error);
 
-                    const auto qry_time = trajectory[index_frame].begin_timestamp + alpha_timestamp * (trajectory[index_frame].end_timestamp - trajectory[index_frame].begin_timestamp);
-                    const auto T_rm_intp_eval = steam_trajectory->getPoseInterpolator(Time(qry_time));
-                    const auto T_ms_intp_eval = inverse(compose(T_sr_var, T_rm_intp_eval));
-                    auto error_func = p2p::p2pError(T_ms_intp_eval, closest_point, keypoint.raw_pt);
+                        // const auto loss_func = L2LossFunc::MakeShared(); /// \todo what loss threshold to use???
+                        const auto loss_func = GemanMcClureLossFunc::MakeShared(options.steam.rv_loss_threshold);
 
-                    // create cost term and add to problem
-                    auto cost = WeightedLeastSqCostTerm<3>::MakeShared(error_func, noise_model, loss_func);
+                        const auto cost = WeightedLeastSqCostTerm<4>::MakeShared(error_func, noise_model, loss_func);
+
+#pragma omp critical(odometry_cost_term)
+                        {
+                            problem.addCostTerm(cost);
+
+                            number_keypoints_used++;
+                        }
+
+                    } else {
+                        Eigen::Matrix3d W = (closest_pt_normal * closest_pt_normal.transpose() + 1e-5 * Eigen::Matrix3d::Identity());
+                        const auto noise_model = StaticNoiseModel<3>::MakeShared(W, NoiseType::INFORMATION);
+
+                        const auto &T_ms_intp_eval = T_ms_intp_eval_vec[i];
+                        const auto error_func = p2p::p2pError(T_ms_intp_eval, closest_point, keypoint.raw_pt);
+
+                        const auto loss_func = L2LossFunc::MakeShared();
+
+                        const auto cost = WeightedLeastSqCostTerm<3>::MakeShared(error_func, noise_model, loss_func);
+
+#pragma omp critical(odometry_cost_term)
+                        {
+                            problem.addCostTerm(cost);
+
+                            number_keypoints_used++;
+                        }
+                    }
+                }
+
+                if (options.steam.use_rv && ((!use_p2p) || (use_p2p && !options.steam.merge_p2p_rv))) {
+                    Eigen::Matrix<double, 1, 1> W = options.steam.rv_cov_inv * Eigen::Matrix<double, 1, 1>::Identity();
+                    const auto noise_model = StaticNoiseModel<1>::MakeShared(W, NoiseType::INFORMATION);
+
+                    const auto &w_ms_ins_intp_eval = w_ms_ins_intp_eval_vec[i];
+                    const auto error_func = p2p::radialVelError(w_ms_ins_intp_eval, keypoint.raw_pt, keypoint.radial_velocity);
+
+                    const auto loss_func = GemanMcClureLossFunc::MakeShared(options.steam.rv_loss_threshold);
+
+                    const auto cost = WeightedLeastSqCostTerm<1>::MakeShared(error_func, noise_model, loss_func);
 
 #pragma omp critical(odometry_cost_term)
                     {
                         problem.addCostTerm(cost);
-
-                        number_keypoints_used++;
                     }
                 }
 
@@ -1264,11 +1320,11 @@ namespace ct_icp {
             timer[3].second->start();
 
             //Update keypoints
-            for (auto &keypoint: keypoints) {
-                const auto qry_time = trajectory[index_frame].begin_timestamp +
-                                      keypoint.alpha_timestamp * (trajectory[index_frame].end_timestamp - trajectory[index_frame].begin_timestamp);
-                const auto T_rm_intp_eval = steam_trajectory->getPoseInterpolator(Time(qry_time));
-                const auto T_ms_intp_eval = inverse(compose(T_sr_var, T_rm_intp_eval));
+#pragma omp parallel for num_threads(options.steam.num_threads)
+            for (int i = 0; i < keypoints.size(); i++) {
+                auto &keypoint = keypoints[i];
+                const auto &T_ms_intp_eval = T_ms_intp_eval_vec[i];
+
                 const auto T_ms = T_ms_intp_eval->evaluate().matrix();
                 keypoint.pt = T_ms.block<3, 3>(0, 0) * keypoint.raw_pt + T_ms.block<3, 1>(0, 3);
             }
