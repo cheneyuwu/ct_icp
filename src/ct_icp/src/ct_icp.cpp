@@ -1040,9 +1040,9 @@ namespace ct_icp {
         auto prev_steam_trajectory = trajectory[index_frame - 1].steam_traj;
         if (prev_steam_trajectory != nullptr) {
             begin_w_mr_inr = prev_steam_trajectory->getVelocityInterpolator(begin_time)->evaluate();
-            std::cout << "[CT_ICP_STEAM] initialize begin_W_mr_inr: " << begin_w_mr_inr.transpose() << std::endl;
+            LOG(INFO) << "[CT_ICP_STEAM] initialize begin_W_mr_inr: " << begin_w_mr_inr.transpose() << std::endl;
             end_w_mr_inr = prev_steam_trajectory->getVelocityInterpolator(end_time)->evaluate();
-            std::cout << "[CT_ICP_STEAM] initialize end_W_mr_inr: " << end_w_mr_inr.transpose() << std::endl;
+            LOG(INFO) << "[CT_ICP_STEAM] initialize end_W_mr_inr: " << end_w_mr_inr.transpose() << std::endl;
         }
 
         // Convert initial and final pose to trajectory
@@ -1051,7 +1051,7 @@ namespace ct_icp {
         std::vector<StateVarBase::Ptr> steam_state_vars;
 
         if (prev_steam_trajectory != nullptr) {
-            std::cout << "[CT_ICP_STEAM] prev_timestamp: " << trajectory[index_frame - 1].end_timestamp << std::endl;
+            LOG(INFO) << "[CT_ICP_STEAM] prev_timestamp: " << trajectory[index_frame - 1].end_timestamp << std::endl;
             Time prev_time(static_cast<double>(trajectory[index_frame - 1].end_timestamp));
             auto prev_T_rm_cov = trajectory[index_frame - 1].end_T_rm_cov;
             auto prev_w_mr_inr_cov = trajectory[index_frame - 1].end_w_mr_inr_cov;
@@ -1069,8 +1069,8 @@ namespace ct_icp {
             if (options.steam.prev_vel_as_prior) steam_trajectory->addVelocityPrior(prev_time, prev_w_mr_inr, prev_w_mr_inr_cov);
         }
 
-        std::cout << "[CT_ICP_STEAM] begin_timestamp: " << trajectory[index_frame].begin_timestamp << std::endl;
-        std::cout << "[CT_ICP_STEAM] end_timestamp: " << trajectory[index_frame].end_timestamp << std::endl;
+        LOG(INFO) << "[CT_ICP_STEAM] begin_timestamp: " << trajectory[index_frame].begin_timestamp << std::endl;
+        LOG(INFO) << "[CT_ICP_STEAM] end_timestamp: " << trajectory[index_frame].end_timestamp << std::endl;
 
         auto begin_T_rm_var = SE3StateVar::MakeShared(begin_T_rm);
         auto begin_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(begin_w_mr_inr);
@@ -1204,7 +1204,7 @@ namespace ct_icp {
 
                 summary.error_log = ss_out.str();
                 if (options.debug_print)
-                    std::cout << summary.error_log;
+                    LOG(INFO) << summary.error_log;
 
                 summary.success = false;
                 return summary;
@@ -1215,13 +1215,13 @@ namespace ct_icp {
             //Solve
             using SolverType = VanillaGaussNewtonSolver;
             SolverType::Params params;
-            params.verbose = false;
+            params.verbose = options.steam.verbose;
             params.maxIterations = (unsigned int)options.steam.max_iterations;
             SolverType solver(&problem, params);
             try {
                 solver.optimize();
             } catch (const decomp_failure &) {
-                std::cout << "Steam optimization failed!" << std::endl;
+                LOG(ERROR) << "Steam optimization failed!" << std::endl;
             }
 
             timer[1].second->stop();
@@ -1256,7 +1256,7 @@ namespace ct_icp {
                 current_estimate.end_T_rm_cov = end_time_cov.block<6, 6>(0, 0);
                 current_estimate.end_w_mr_inr_cov = end_time_cov.block<6, 6>(6, 6);
             } catch (const std::runtime_error &) {
-                std::cout << "Steam optimization failed! (Cannot query covariance)" << std::endl;
+                LOG(ERROR) << "Steam optimization failed! (Cannot query covariance)" << std::endl;
             }
 
             timer[2].second->stop();
@@ -1282,7 +1282,7 @@ namespace ct_icp {
                 summary.num_residuals_used = number_keypoints_used;
 
                 if (options.debug_print) {
-                    std::cout << "CT_ICP: Finished with N=" << iter << " ICP iterations" << std::endl;
+                    LOG(INFO) << "CT_ICP: Finished with N=" << iter << " ICP iterations" << std::endl;
                 }
 
                 return summary;
@@ -1291,12 +1291,12 @@ namespace ct_icp {
 
         if (options.debug_print) {
             for (size_t i = 0; i < timer.size(); i++)
-                std::cout << "Elapsed " << timer[i].first << *(timer[i].second) << std::endl;
+                LOG(INFO) << "Elapsed " << timer[i].first << *(timer[i].second) << std::endl;
             for (size_t i = 0; i < inner_timer.size(); i++)
-                std::cout << "Elapsed (Inner Loop) " << inner_timer[i].first << *(inner_timer[i].second) << std::endl;
-            std::cout << "Number iterations CT-ICP : " << options.num_iters_icp << std::endl;
-            std::cout << "Translation Begin: " << trajectory[index_frame].begin_t.transpose() << std::endl;
-            std::cout << "Translation End: " << trajectory[index_frame].end_t.transpose() << std::endl;
+                LOG(INFO) << "Elapsed (Inner Loop) " << inner_timer[i].first << *(inner_timer[i].second) << std::endl;
+            LOG(INFO) << "Number iterations CT-ICP : " << options.num_iters_icp << std::endl;
+            LOG(INFO) << "Translation Begin: " << trajectory[index_frame].begin_t.transpose() << std::endl;
+            LOG(INFO) << "Translation End: " << trajectory[index_frame].end_t.transpose() << std::endl;
         }
         summary.success = true;
         summary.num_residuals_used = number_keypoints_used;

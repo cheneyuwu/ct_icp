@@ -162,7 +162,7 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
     if (T_sr_vec.size() != 6) throw std::invalid_argument{"T_sr malformed. Must be 6 elements!"};
     visualization_options.T_sr = lgmath::se3::vec2tran(Eigen::Matrix<double, 6, 1>(T_sr_vec.data()));
     LOG(INFO) << "Parameter " << prefix + "T_sr"
-              << " = " << visualization_options.T_sr << std::endl;
+              << " = " << std::endl << visualization_options.T_sr << std::endl;
   }
 
   /// dataset options
@@ -336,19 +336,20 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       steam.qc_inv.diagonal() << qc_inv_diag[0], qc_inv_diag[1], qc_inv_diag[2], qc_inv_diag[3], qc_inv_diag[4],
           qc_inv_diag[5];
       LOG(INFO) << "Parameter " << prefix + "qc_inv_diag"
-                << " = " << steam.qc_inv.diagonal() << std::endl;
+                << " = " << steam.qc_inv.diagonal().transpose() << std::endl;
 
       std::vector<double> T_sr_vec;
       ROS2_PARAM_NO_LOG(node, T_sr_vec, prefix, T_sr_vec, std::vector<double>);
       if (T_sr_vec.size() != 6) throw std::invalid_argument{"T_sr malformed. Must be 6 elements!"};
       steam.T_sr = lgmath::se3::vec2tran(Eigen::Matrix<double, 6, 1>(T_sr_vec.data()));
       LOG(INFO) << "Parameter " << prefix + "T_sr"
-                << " = " << steam.T_sr << std::endl;
+                << " = " << std::endl << steam.T_sr << std::endl;
 
       ROS2_PARAM_CLAUSE(node, steam, prefix, lock_prev_pose, bool);
       ROS2_PARAM_CLAUSE(node, steam, prefix, lock_prev_vel, bool);
       ROS2_PARAM_CLAUSE(node, steam, prefix, prev_pose_as_prior, bool);
       ROS2_PARAM_CLAUSE(node, steam, prefix, prev_vel_as_prior, bool);
+      ROS2_PARAM_CLAUSE(node, steam, prefix, verbose, bool);
       ROS2_PARAM_CLAUSE(node, steam, prefix, max_iterations, int);
       ROS2_PARAM_CLAUSE(node, steam, prefix, num_threads, int);
     }

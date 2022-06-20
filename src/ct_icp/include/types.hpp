@@ -48,10 +48,10 @@ namespace ct_icp {
         bool success = true;
         double begin_timestamp = 0.0;
         double end_timestamp = 1.0;
-        Eigen::Matrix3d begin_R;
-        Eigen::Vector3d begin_t;
-        Eigen::Matrix3d end_R;
-        Eigen::Vector3d end_t;
+        Eigen::Matrix3d begin_R = Eigen::Matrix3d::Identity();
+        Eigen::Vector3d begin_t = Eigen::Vector3d::Zero();
+        Eigen::Matrix3d end_R = Eigen::Matrix3d::Identity();
+        Eigen::Vector3d end_t = Eigen::Vector3d::Zero();
 
         steam::traj::const_vel::Interface::Ptr steam_traj;
         Eigen::Matrix<double, 6, 6> begin_T_rm_cov = Eigen::Matrix<double, 6, 6>::Identity();

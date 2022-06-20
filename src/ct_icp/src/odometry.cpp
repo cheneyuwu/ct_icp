@@ -282,7 +282,7 @@ namespace ct_icp {
         sub_sample_frame(frame, sample_size);
 
         // No elastic ICP for first frame because no initialization of ego-motion
-        if (index_frame == 1) {
+        if ((options_.ct_icp_options.solver != STEAM) && (index_frame == 1)) {
             for (auto &point3D: frame) {
                 point3D.alpha_timestamp = 1.0;
             }

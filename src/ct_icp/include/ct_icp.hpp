@@ -140,6 +140,7 @@ namespace ct_icp {
             bool lock_prev_vel = false;
             bool prev_pose_as_prior = false;
             bool prev_vel_as_prior = false;
+            bool verbose = false;
             int max_iterations = 1;
             unsigned int num_threads = 1;
         } steam;

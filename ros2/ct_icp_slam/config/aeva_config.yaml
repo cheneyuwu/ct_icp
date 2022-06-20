@@ -75,5 +75,6 @@
           lock_prev_vel: false
           prev_pose_as_prior: true
           prev_vel_as_prior: false
+          verbose: false
           max_iterations: 1
           num_threads: 1
