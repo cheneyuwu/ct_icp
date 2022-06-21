@@ -16,6 +16,12 @@ bash ct_icp_build.sh Release "Unix Makefiles"
 source /opt/ros/galactic/setup.bash
 ros2 run rviz2 rviz2 -d ${WORKING_DIR}/ros2/ct_icp_slam/rviz/slam.rviz # launch rviz
 
+################# existing datasets #################
+## Run odometry
+# - change config file
+source ${WORKING_DIR}/ros2/install/setup.bash
+ros2 run ct_icp_slam ct_icp_slam --ros-args --params-file ${WORKING_DIR}/ros2/ct_icp_slam/config/kitti_raw_elastic_config.yaml
+
 ################# boreas #################
 ## Run odometry
 # - change config file

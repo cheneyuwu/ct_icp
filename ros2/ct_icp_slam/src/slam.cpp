@@ -95,15 +95,15 @@ struct SLAMOptions {
   OdometryOptions odometry_options;
 
   int max_num_threads = 1;               // The maximum number of threads running in parallel the Dataset acquisition
-  bool suspend_on_failure = false;       // Whether to suspend the execution once an error is detected
   bool save_trajectory = true;           // whether to save the trajectory
+  bool suspend_on_failure = false;       // Whether to suspend the execution once an error is detected
   std::string output_dir = "./outputs";  // The output path (relative or absolute) to save the pointclouds
   bool all_sequences = true;             // Whether to run the algorithm on all sequences of the dataset found on disk
   std::string sequence;                  // The desired sequence (only applicable if `all_sequences` is false)
-  int start_index = 0;     // The start index of the sequence (only applicable if `all_sequences` is false)
-  int max_frames = -1;     // The maximum number of frames to register (if -1 all frames in the Dataset are registered)
-  bool with_viz3d = true;  // Whether to display timing and debug information
-  SLAM_VIZ_MODE viz_mode = KEYPOINTS;  // The visualization mode for the point clouds (in AGGREGATED, KEYPOINTS)
+  int start_index = 0;      // The start index of the sequence (only applicable if `all_sequences` is false)
+  int max_frames = -1;      // The maximum number of frames to register (if -1 all frames in the Dataset are registered)
+  bool with_viz3d = false;  // Whether to display timing and debug information
+  SLAM_VIZ_MODE viz_mode = AGGREGATED;  // The visualization mode for the point clouds (in AGGREGATED, KEYPOINTS)
 
   struct {
     bool odometry = true;
@@ -130,8 +130,8 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
   /// slam options
   {
     ROS2_PARAM_CLAUSE(node, options, prefix, max_num_threads, int);
-    ROS2_PARAM_CLAUSE(node, options, prefix, suspend_on_failure, bool);
     ROS2_PARAM_CLAUSE(node, options, prefix, save_trajectory, bool);
+    ROS2_PARAM_CLAUSE(node, options, prefix, suspend_on_failure, bool);
 
     ROS2_PARAM_CLAUSE(node, options, prefix, output_dir, std::string);
     if (!options.output_dir.empty() && options.output_dir[options.output_dir.size() - 1] != '/')
@@ -161,8 +161,10 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
 
     std::vector<double> T_sr_vec;
     ROS2_PARAM_NO_LOG(node, T_sr_vec, prefix, T_sr_vec, std::vector<double>);
-    if (T_sr_vec.size() != 6) throw std::invalid_argument{"T_sr malformed. Must be 6 elements!"};
-    visualization_options.T_sr = lgmath::se3::vec2tran(Eigen::Matrix<double, 6, 1>(T_sr_vec.data()));
+    if ((T_sr_vec.size() != 6) && (T_sr_vec.size() != 0))
+      throw std::invalid_argument{"T_sr malformed. Must be 6 elements!"};
+    if (T_sr_vec.size() == 6)
+      visualization_options.T_sr = lgmath::se3::vec2tran(Eigen::Matrix<double, 6, 1>(T_sr_vec.data()));
     LOG(INFO) << "Parameter " << prefix + "T_sr"
               << " = " << std::endl
               << visualization_options.T_sr << std::endl;
@@ -198,6 +200,7 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
     ROS2_PARAM_CLAUSE(node, dataset_options, prefix, fail_if_incomplete, bool);
     ROS2_PARAM_CLAUSE(node, dataset_options, prefix, min_dist_lidar_center, float);
     ROS2_PARAM_CLAUSE(node, dataset_options, prefix, max_dist_lidar_center, float);
+    ROS2_PARAM_CLAUSE(node, dataset_options, prefix, nclt_num_aggregated_pc, int);
   }
 
   /// odometry options
@@ -205,29 +208,30 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
     auto &odometry_options = options.odometry_options;
     prefix = "odometry_options.";
 
+    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, init_voxel_size, double);
+    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, init_sample_voxel_size, double);
+    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, init_num_frames, int);
+
     ROS2_PARAM_CLAUSE(node, odometry_options, prefix, voxel_size, double);
     ROS2_PARAM_CLAUSE(node, odometry_options, prefix, sample_voxel_size, double);
     ROS2_PARAM_CLAUSE(node, odometry_options, prefix, max_distance, double);
     ROS2_PARAM_CLAUSE(node, odometry_options, prefix, max_num_points_in_voxel, int);
-    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, debug_print, bool);
-    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, debug_viz, bool);
-
     ROS2_PARAM_CLAUSE(node, odometry_options, prefix, min_distance_points, double);
     ROS2_PARAM_CLAUSE(node, odometry_options, prefix, distance_error_threshold, double);
-    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, init_num_frames, int);
-    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, init_voxel_size, double);
-    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, init_sample_voxel_size, double);
-    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, log_to_file, bool);
-    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, log_file_destination, std::string);
 
     ROS2_PARAM_CLAUSE(node, odometry_options, prefix, robust_minimal_level, int);
     ROS2_PARAM_CLAUSE(node, odometry_options, prefix, robust_registration, bool);
     ROS2_PARAM_CLAUSE(node, odometry_options, prefix, robust_full_voxel_threshold, double);
+    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, robust_empty_voxel_threshold, double);
+    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, robust_neighborhood_min_dist, double);
+    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, robust_neighborhood_min_orientation, double);
+    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, robust_relative_trans_threshold, double);
     ROS2_PARAM_CLAUSE(node, odometry_options, prefix, robust_fail_early, bool);
     ROS2_PARAM_CLAUSE(node, odometry_options, prefix, robust_num_attempts, int);
-    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, robust_max_voxel_neighborhood, int);
-    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, robust_threshold_relative_orientation, double)
+    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, robust_num_attempts_when_rotation, int);
+    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, robust_max_voxel_neighborhood, short);
     ROS2_PARAM_CLAUSE(node, odometry_options, prefix, robust_threshold_ego_orientation, double);
+    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, robust_threshold_relative_orientation, double)
 
     std::string motion_compensation;
     ROS2_PARAM(node, motion_compensation, prefix, motion_compensation, std::string);
@@ -239,8 +243,11 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       odometry_options.motion_compensation = ct_icp::ITERATIVE;
     else if (motion_compensation == "CONTINUOUS")
       odometry_options.motion_compensation = ct_icp::CONTINUOUS;
-    else
-      throw std::runtime_error("Invalid motion_compensation");
+    else {
+      LOG(WARNING) << "Parameter " << prefix + "motion_compensation"
+                   << " not specified. Using default value: "
+                   << "CONTINUOUS";
+    }
 
     std::string initialization;
     ROS2_PARAM(node, initialization, prefix, initialization, std::string);
@@ -248,8 +255,16 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       odometry_options.initialization = ct_icp::INIT_NONE;
     else if (initialization == "INIT_CONSTANT_VELOCITY")
       odometry_options.initialization = ct_icp::INIT_CONSTANT_VELOCITY;
-    else
-      throw std::runtime_error("Invalid initialization");
+    else {
+      LOG(WARNING) << "Parameter " << prefix + "initialization"
+                   << " not specified. Using default value: "
+                   << "INIT_CONSTANT_VELOCITY";
+    }
+
+    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, debug_print, bool);
+    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, debug_viz, bool);
+    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, log_to_file, bool);
+    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, log_file_destination, std::string);
   }
 
   /// ct_icp options
@@ -258,30 +273,20 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
     prefix = "odometry_options.ct_icp_options.";
 
     ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, threshold_voxel_occupancy, int);
+    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, init_num_frames, int);
     ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, size_voxel_map, double);
     ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, num_iters_icp, int);
     ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, min_number_neighbors, int);
     ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, voxel_neighborhood, short);
+    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, power_planarity, double);
+    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, estimate_normal_from_neighborhood, bool);
     ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, max_number_neighbors, int);
     ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, max_dist_to_plane_ct_icp, double);
     ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, threshold_orientation_norm, double);
     ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, threshold_translation_norm, double);
-    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, debug_print, bool);
     ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, point_to_plane_with_distortion, bool);
-    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, num_closest_neighbors, int);
-    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, beta_constant_velocity, double);
-    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, beta_location_consistency, double);
-    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, beta_small_velocity, double);
-    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, beta_orientation_consistency, double);
-    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, ls_max_num_iters, int);
-    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, ls_num_threads, int);
-    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, ls_sigma, double);
-    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, min_num_residuals, int);
     ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, max_num_residuals, int);
-    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, weight_alpha, double);
-    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, weight_neighborhood, double);
-    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, ls_tolerant_min_threshold, double);
-    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, debug_viz, bool);
+    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, min_num_residuals, int);
 
     std::string distance;
     ROS2_PARAM(node, distance, prefix, distance, std::string);
@@ -289,19 +294,34 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       ct_icp_options.distance = POINT_TO_PLANE;
     else if (distance == "CT_POINT_TO_PLANE")
       ct_icp_options.distance = CT_POINT_TO_PLANE;
-    else
-      throw std::runtime_error("Invalid distance");
+    else {
+      LOG(WARNING) << "Parameter " << prefix + "distance"
+                   << " not specified. Using default value: "
+                   << "CT_POINT_TO_PLANE";
+    }
 
-    std::string viz_mode;
-    ROS2_PARAM(node, viz_mode, prefix, viz_mode, std::string);
-    if (viz_mode == "NORMAL")
-      ct_icp_options.viz_mode = NORMAL;
-    else if (viz_mode == "WEIGHT")
-      ct_icp_options.viz_mode = WEIGHT;
-    else if (viz_mode == "TIMESTAMP")
-      ct_icp_options.viz_mode = TIMESTAMP;
-    else
-      ct_icp_options.viz_mode = TIMESTAMP;  // default
+    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, num_closest_neighbors, int);
+    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, beta_location_consistency, double);
+    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, beta_constant_velocity, double);
+    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, beta_small_velocity, double);
+    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, beta_orientation_consistency, double);
+
+    std::string weighting_scheme;
+    ROS2_PARAM(node, weighting_scheme, prefix, weighting_scheme, std::string);
+    if (weighting_scheme == "PLANARITY")
+      ct_icp_options.weighting_scheme = PLANARITY;
+    else if (weighting_scheme == "NEIGHBORHOOD")
+      ct_icp_options.weighting_scheme = NEIGHBORHOOD;
+    else if (weighting_scheme == "ALL")
+      ct_icp_options.weighting_scheme = ALL;
+    else {
+      LOG(WARNING) << "Parameter " << prefix + "weighting_scheme"
+                   << " not specified. Using default value: "
+                   << "ALL";
+    }
+
+    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, weight_alpha, double);
+    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, weight_neighborhood, double);
 
     std::string solver;
     ROS2_PARAM(node, solver, prefix, solver, std::string);
@@ -311,8 +331,11 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       ct_icp_options.solver = CERES;
     else if (solver == "STEAM")
       ct_icp_options.solver = STEAM;
-    else
-      throw std::runtime_error("Invalid solver");
+    else {
+      LOG(WARNING) << "Parameter " << prefix + "solver"
+                   << " not specified. Using default value: "
+                   << "GN";
+    }
 
     std::string loss_function;
     ROS2_PARAM(node, loss_function, prefix, loss_function, std::string);
@@ -326,8 +349,33 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       ct_icp_options.loss_function = TOLERANT;
     else if (loss_function == "TRUNCATED")
       ct_icp_options.loss_function = TRUNCATED;
-    else
-      throw std::runtime_error("Invalid loss_function");
+    else {
+      LOG(WARNING) << "Parameter " << prefix + "loss_function"
+                   << " not specified. Using default value: "
+                   << "CAUCHY";
+    }
+
+    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, ls_max_num_iters, int);
+    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, ls_num_threads, int);
+    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, ls_sigma, double);
+    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, ls_tolerant_min_threshold, double);
+
+    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, debug_print, bool);
+    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, debug_viz, bool);
+
+    std::string viz_mode;
+    ROS2_PARAM(node, viz_mode, prefix, viz_mode, std::string);
+    if (viz_mode == "NORMAL")
+      ct_icp_options.viz_mode = NORMAL;
+    else if (viz_mode == "WEIGHT")
+      ct_icp_options.viz_mode = WEIGHT;
+    else if (viz_mode == "TIMESTAMP")
+      ct_icp_options.viz_mode = TIMESTAMP;
+    else {
+      LOG(WARNING) << "Parameter " << prefix + "viz_mode"
+                   << " not specified. Using default value: "
+                   << "TIMESTAMP";
+    }
 
     {
       auto &steam = options.odometry_options.ct_icp_options.steam;
@@ -335,16 +383,20 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
 
       std::vector<double> T_sr_vec;
       ROS2_PARAM_NO_LOG(node, T_sr_vec, prefix, T_sr_vec, std::vector<double>);
-      if (T_sr_vec.size() != 6) throw std::invalid_argument{"T_sr malformed. Must be 6 elements!"};
-      steam.T_sr = lgmath::se3::vec2tran(Eigen::Matrix<double, 6, 1>(T_sr_vec.data()));
+      if ((T_sr_vec.size() != 6) && (T_sr_vec.size() != 0))
+        throw std::invalid_argument{"T_sr malformed. Must be 6 elements!"};
+      if (T_sr_vec.size() == 6) steam.T_sr = lgmath::se3::vec2tran(Eigen::Matrix<double, 6, 1>(T_sr_vec.data()));
       LOG(INFO) << "Parameter " << prefix + "T_sr"
                 << " = " << std::endl
                 << steam.T_sr << std::endl;
 
       std::vector<double> qc_inv_diag;
       ROS2_PARAM_NO_LOG(node, qc_inv_diag, prefix, qc_inv_diag, std::vector<double>);
-      if (qc_inv_diag.size() != 6) throw std::invalid_argument{"Qc diagonal malformed. Must be 6 elements!"};
-      steam.qc_inv.diagonal() << qc_inv_diag[0], qc_inv_diag[1], qc_inv_diag[2], qc_inv_diag[3], qc_inv_diag[4], qc_inv_diag[5];
+      if ((qc_inv_diag.size() != 6) && (qc_inv_diag.size() != 0))
+        throw std::invalid_argument{"Qc diagonal malformed. Must be 6 elements!"};
+      if (qc_inv_diag.size() == 6)
+        steam.qc_inv.diagonal() << qc_inv_diag[0], qc_inv_diag[1], qc_inv_diag[2], qc_inv_diag[3], qc_inv_diag[4],
+            qc_inv_diag[5];
       LOG(INFO) << "Parameter " << prefix + "qc_inv_diag"
                 << " = " << steam.qc_inv.diagonal().transpose() << std::endl;
 
@@ -355,16 +407,17 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       ROS2_PARAM_CLAUSE(node, steam, prefix, num_extra_states, int);
       ROS2_PARAM_CLAUSE(node, steam, prefix, no_prev_state_iters, int);
 
-
       ROS2_PARAM_CLAUSE(node, steam, prefix, use_vp, bool);
 
       std::vector<double> vp_cov_diag;
       ROS2_PARAM_NO_LOG(node, vp_cov_diag, prefix, vp_cov_diag, std::vector<double>);
-      if (vp_cov_diag.size() != 6) throw std::invalid_argument{"Velocity prior cov malformed. Must be 6 elements!"};
-      steam.vp_cov.diagonal() << vp_cov_diag[0], vp_cov_diag[1], vp_cov_diag[2], vp_cov_diag[3], vp_cov_diag[4], vp_cov_diag[5];
+      if ((vp_cov_diag.size() != 6) && (vp_cov_diag.size() != 0))
+        throw std::invalid_argument{"Velocity prior cov malformed. Must be 6 elements!"};
+      if (vp_cov_diag.size() == 6)
+        steam.vp_cov.diagonal() << vp_cov_diag[0], vp_cov_diag[1], vp_cov_diag[2], vp_cov_diag[3], vp_cov_diag[4],
+            vp_cov_diag[5];
       LOG(INFO) << "Parameter " << prefix + "vp_cov_diag"
                 << " = " << steam.vp_cov.diagonal().transpose() << std::endl;
-
 
       ROS2_PARAM_CLAUSE(node, steam, prefix, use_rv, bool);
       ROS2_PARAM_CLAUSE(node, steam, prefix, merge_p2p_rv, bool);

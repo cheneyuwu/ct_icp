@@ -754,7 +754,7 @@ namespace ct_icp {
         inner_timer.emplace_back("Search Neighbors ............. ", std::make_unique<Stopwatch>(false));
         inner_timer.emplace_back("Compute Normal ............... ", std::make_unique<Stopwatch>(false));
         inner_timer.emplace_back("Add Cost Term ................ ", std::make_unique<Stopwatch>(false));
-        bool innerloop_time = (options.steam.num_threads == 1);
+        bool innerloop_time = (options.ls_num_threads == 1);
 
         ICPSummary summary;
 
@@ -769,7 +769,7 @@ namespace ct_icp {
 
             timer[0].second->start();
 
-#pragma omp parallel for num_threads(options.steam.num_threads)
+#pragma omp parallel for num_threads(options.ls_num_threads)
             for (auto &keypoint: keypoints) {
                 auto &pt_keypoint = keypoint.pt;
 
@@ -969,6 +969,7 @@ namespace ct_icp {
             timer[3].second->start();
 
             //Update keypoints
+#pragma omp parallel for num_threads(options.ls_num_threads)
             for (auto &keypoint: keypoints) {
                 Eigen::Quaterniond q_begin = Eigen::Quaterniond(trajectory[index_frame].begin_R);
                 Eigen::Quaterniond q_end = Eigen::Quaterniond(trajectory[index_frame].end_R);
