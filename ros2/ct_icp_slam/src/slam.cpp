@@ -344,8 +344,7 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       std::vector<double> qc_inv_diag;
       ROS2_PARAM_NO_LOG(node, qc_inv_diag, prefix, qc_inv_diag, std::vector<double>);
       if (qc_inv_diag.size() != 6) throw std::invalid_argument{"Qc diagonal malformed. Must be 6 elements!"};
-      steam.qc_inv.diagonal() << qc_inv_diag[0], qc_inv_diag[1], qc_inv_diag[2], qc_inv_diag[3], qc_inv_diag[4],
-          qc_inv_diag[5];
+      steam.qc_inv.diagonal() << qc_inv_diag[0], qc_inv_diag[1], qc_inv_diag[2], qc_inv_diag[3], qc_inv_diag[4], qc_inv_diag[5];
       LOG(INFO) << "Parameter " << prefix + "qc_inv_diag"
                 << " = " << steam.qc_inv.diagonal().transpose() << std::endl;
 
@@ -353,6 +352,19 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       ROS2_PARAM_CLAUSE(node, steam, prefix, lock_prev_vel, bool);
       ROS2_PARAM_CLAUSE(node, steam, prefix, prev_pose_as_prior, bool);
       ROS2_PARAM_CLAUSE(node, steam, prefix, prev_vel_as_prior, bool);
+      ROS2_PARAM_CLAUSE(node, steam, prefix, num_extra_states, int);
+      ROS2_PARAM_CLAUSE(node, steam, prefix, no_prev_state_iters, int);
+
+
+      ROS2_PARAM_CLAUSE(node, steam, prefix, use_vp, bool);
+
+      std::vector<double> vp_cov_diag;
+      ROS2_PARAM_NO_LOG(node, vp_cov_diag, prefix, vp_cov_diag, std::vector<double>);
+      if (vp_cov_diag.size() != 6) throw std::invalid_argument{"Velocity prior cov malformed. Must be 6 elements!"};
+      steam.vp_cov.diagonal() << vp_cov_diag[0], vp_cov_diag[1], vp_cov_diag[2], vp_cov_diag[3], vp_cov_diag[4], vp_cov_diag[5];
+      LOG(INFO) << "Parameter " << prefix + "vp_cov_diag"
+                << " = " << steam.vp_cov.diagonal().transpose() << std::endl;
+
 
       ROS2_PARAM_CLAUSE(node, steam, prefix, use_rv, bool);
       ROS2_PARAM_CLAUSE(node, steam, prefix, merge_p2p_rv, bool);

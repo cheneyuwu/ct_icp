@@ -142,6 +142,11 @@ namespace ct_icp {
             bool lock_prev_vel = false;
             bool prev_pose_as_prior = false;
             bool prev_vel_as_prior = false;
+            int num_extra_states = 0;
+            int no_prev_state_iters = 0;
+            // velocity prior (no side slipping)
+            bool use_vp = false;
+            Eigen::Matrix<double, 6, 6> vp_cov = Eigen::Matrix<double, 6, 6>::Identity();
             // radial velocity
             bool use_rv = false;
             bool merge_p2p_rv = false;

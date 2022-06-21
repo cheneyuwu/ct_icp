@@ -1020,69 +1020,62 @@ namespace ct_icp {
         const auto T_sr_var = SE3StateVar::MakeShared(lgmath::se3::Transformation(options.steam.T_sr));
         T_sr_var->locked() = true;
 
-        // prev trajectory for initialization of velocity
-        // first state
-        Time begin_time(static_cast<double>(trajectory[index_frame].begin_timestamp));
-        Eigen::Matrix4d begin_T_ms = Eigen::Matrix4d::Identity();
-        begin_T_ms.block(0, 0, 3, 3) = trajectory[index_frame].begin_R;
-        begin_T_ms.block(0, 3, 3, 1) = trajectory[index_frame].begin_t;
-        lgmath::se3::Transformation begin_T_rm = lgmath::se3::Transformation(Eigen::Matrix4d(begin_T_ms * options.steam.T_sr)).inverse();
-        Eigen::Matrix<double, 6, 1> begin_w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
-        // last state
-        Time end_time(static_cast<double>(trajectory[index_frame].end_timestamp));
-        Eigen::Matrix4d end_T_ms = Eigen::Matrix4d::Identity();
-        end_T_ms.block(0, 0, 3, 3) = trajectory[index_frame].end_R;
-        end_T_ms.block(0, 3, 3, 1) = trajectory[index_frame].end_t;
-        lgmath::se3::Transformation end_T_rm = lgmath::se3::Transformation(Eigen::Matrix4d(end_T_ms * options.steam.T_sr)).inverse();
-        Eigen::Matrix<double, 6, 1> end_w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
-
-        // use previous trajectory to initialize velocity
-        auto prev_steam_trajectory = trajectory[index_frame - 1].steam_traj;
-        if (prev_steam_trajectory != nullptr) {
-            begin_w_mr_inr = prev_steam_trajectory->getVelocityInterpolator(begin_time)->evaluate();
-            LOG(INFO) << "[CT_ICP_STEAM] initialize begin_W_mr_inr: " << begin_w_mr_inr.transpose() << std::endl;
-            end_w_mr_inr = prev_steam_trajectory->getVelocityInterpolator(end_time)->evaluate();
-            LOG(INFO) << "[CT_ICP_STEAM] initialize end_W_mr_inr: " << end_w_mr_inr.transpose() << std::endl;
-        }
-
-        // Convert initial and final pose to trajectory
+        ///
         const auto steam_trajectory = const_vel::Interface::MakeShared(options.steam.qc_inv, true);
-
         std::vector<StateVarBase::Ptr> steam_state_vars;
 
+        /// use previous trajectory to initialize steam state variables
+        LOG(INFO) << "[CT_ICP_STEAM] prev_timestamp: " << trajectory[index_frame - 1].end_timestamp << std::endl;
+        Time prev_time(static_cast<double>(trajectory[index_frame - 1].end_timestamp));
+        lgmath::se3::Transformation prev_T_rm;
+        Eigen::Matrix<double, 6, 1> prev_w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
+        Eigen::Matrix<double, 6, 6> prev_T_rm_cov = Eigen::Matrix<double, 6, 6>::Identity();
+        Eigen::Matrix<double, 6, 6> prev_w_mr_inr_cov = Eigen::Matrix<double, 6, 6>::Identity();
+
+        auto prev_steam_trajectory = trajectory[index_frame - 1].steam_traj;
         if (prev_steam_trajectory != nullptr) {
-            LOG(INFO) << "[CT_ICP_STEAM] prev_timestamp: " << trajectory[index_frame - 1].end_timestamp << std::endl;
-            Time prev_time(static_cast<double>(trajectory[index_frame - 1].end_timestamp));
-            auto prev_T_rm_cov = trajectory[index_frame - 1].end_T_rm_cov;
-            auto prev_w_mr_inr_cov = trajectory[index_frame - 1].end_w_mr_inr_cov;
-
-            const auto prev_T_rm = prev_steam_trajectory->getPoseInterpolator(prev_time)->evaluate();
-            const auto prev_w_mr_inr = prev_steam_trajectory->getVelocityInterpolator(prev_time)->evaluate();
-            auto prev_T_rm_var = SE3StateVar::MakeShared(prev_T_rm);
-            auto prev_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(prev_w_mr_inr);
-            steam_trajectory->add(prev_time, prev_T_rm_var, prev_w_mr_inr_var);
-            steam_state_vars.emplace_back(prev_T_rm_var);
-            steam_state_vars.emplace_back(prev_w_mr_inr_var);
-            if (options.steam.lock_prev_pose) prev_T_rm_var->locked() = true;
-            if (options.steam.lock_prev_vel) prev_w_mr_inr_var->locked() = true;
-            if (options.steam.prev_pose_as_prior) steam_trajectory->addPosePrior(prev_time, prev_T_rm, prev_T_rm_cov);
-            if (options.steam.prev_vel_as_prior) steam_trajectory->addVelocityPrior(prev_time, prev_w_mr_inr, prev_w_mr_inr_cov);
+            prev_T_rm = prev_steam_trajectory->getPoseInterpolator(prev_time)->evaluate();
+            prev_w_mr_inr = prev_steam_trajectory->getVelocityInterpolator(prev_time)->evaluate();
+            prev_T_rm_cov = trajectory[index_frame - 1].end_T_rm_cov;
+            prev_w_mr_inr_cov = trajectory[index_frame - 1].end_w_mr_inr_cov;
         }
-
+#if false
+        auto prev_T_rm_var = SE3StateVar::MakeShared(prev_T_rm);
+        auto prev_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(prev_w_mr_inr);
+        steam_trajectory->add(prev_time, prev_T_rm_var, prev_w_mr_inr_var);
+        steam_state_vars.emplace_back(prev_T_rm_var);
+        steam_state_vars.emplace_back(prev_w_mr_inr_var);
+        if (options.steam.lock_prev_pose) prev_T_rm_var->locked() = true;
+        if (options.steam.lock_prev_vel) prev_w_mr_inr_var->locked() = true;
+        if (options.steam.prev_pose_as_prior) steam_trajectory->addPosePrior(prev_time, prev_T_rm, prev_T_rm_cov);
+        if (options.steam.prev_vel_as_prior) steam_trajectory->addVelocityPrior(prev_time, prev_w_mr_inr, prev_w_mr_inr_cov);
+#endif
+        /// New state for this frame
         LOG(INFO) << "[CT_ICP_STEAM] begin_timestamp: " << trajectory[index_frame].begin_timestamp << std::endl;
         LOG(INFO) << "[CT_ICP_STEAM] end_timestamp: " << trajectory[index_frame].end_timestamp << std::endl;
-
-        auto begin_T_rm_var = SE3StateVar::MakeShared(begin_T_rm);
-        auto begin_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(begin_w_mr_inr);
-        steam_trajectory->add(begin_time, begin_T_rm_var, begin_w_mr_inr_var);
-        steam_state_vars.emplace_back(begin_T_rm_var);
-        steam_state_vars.emplace_back(begin_w_mr_inr_var);
-
-        auto end_T_rm_var = SE3StateVar::MakeShared(end_T_rm);
-        auto end_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(end_w_mr_inr);
-        steam_trajectory->add(end_time, end_T_rm_var, end_w_mr_inr_var);
-        steam_state_vars.emplace_back(end_T_rm_var);
-        steam_state_vars.emplace_back(end_w_mr_inr_var);
+        LOG(INFO) << "[CT_ICP_STEAM] totoal num states: " << (options.steam.num_extra_states + 2) << std::endl;
+        const double begin_timestamp = trajectory[index_frame].begin_timestamp;
+        const double end_timestamp = trajectory[index_frame].end_timestamp;
+        const int num_states = options.steam.num_extra_states + 2;
+        const double time_diff = (end_timestamp - begin_timestamp) / (static_cast<double>(num_states) - 1.0);
+        for (int i = 0; i < num_states; ++i) {
+            Time knot_time(static_cast<double>(begin_timestamp + i * time_diff));
+            //
+            const Eigen::Matrix<double,6,1> xi_mr_inr_odo((knot_time - prev_time).seconds() * prev_w_mr_inr);
+            const auto knot_T_rm = lgmath::se3::Transformation(xi_mr_inr_odo) * prev_T_rm;
+            const auto T_rm_var = SE3StateVar::MakeShared(knot_T_rm);
+            //
+            const auto w_mr_inr_var = VSpaceStateVar<6>::MakeShared(prev_w_mr_inr);
+            //
+            steam_trajectory->add(knot_time, T_rm_var, w_mr_inr_var);
+            steam_state_vars.emplace_back(T_rm_var);
+            steam_state_vars.emplace_back(w_mr_inr_var);
+            //
+            if (options.steam.use_vp) {
+                Eigen::Matrix<double, 6, 1> prior_w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
+                steam_trajectory->addVelocityPrior(knot_time, prior_w_mr_inr, options.steam.vp_cov);
+            }
+        }
 
         // Get evaluator for query points
         std::vector<Evaluable<const_vel::Interface::PoseType>::ConstPtr> T_ms_intp_eval_vec;
@@ -1122,7 +1115,23 @@ namespace ct_icp {
         ICPSummary summary;
 
         int num_iter_icp = index_frame < options.init_num_frames ? 15 : options.num_iters_icp;
+        num_iter_icp += options.steam.no_prev_state_iters;
+        bool prev_state_added = false;
         for (int iter(0); iter < num_iter_icp; iter++) {
+
+            if (!prev_state_added && iter >= options.steam.no_prev_state_iters) {
+                LOG(INFO) << "[CT_ICP_STEAM] Adding previous state to trajectory." << std::endl;
+                auto prev_T_rm_var = SE3StateVar::MakeShared(prev_T_rm);
+                auto prev_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(prev_w_mr_inr);
+                steam_trajectory->add(prev_time, prev_T_rm_var, prev_w_mr_inr_var);
+                steam_state_vars.emplace_back(prev_T_rm_var);
+                steam_state_vars.emplace_back(prev_w_mr_inr_var);
+                if (options.steam.lock_prev_pose) prev_T_rm_var->locked() = true;
+                if (options.steam.lock_prev_vel) prev_w_mr_inr_var->locked() = true;
+                if (options.steam.prev_pose_as_prior) steam_trajectory->addPosePrior(prev_time, prev_T_rm, prev_T_rm_cov);
+                if (options.steam.prev_vel_as_prior) steam_trajectory->addVelocityPrior(prev_time, prev_w_mr_inr, prev_w_mr_inr_cov);
+                prev_state_added = true;
+            }
 
             number_keypoints_used = 0;
 
@@ -1289,15 +1298,17 @@ namespace ct_icp {
 
             auto &current_estimate = trajectory[index_frame];
 
+            Time begin_time(static_cast<double>(trajectory[index_frame].begin_timestamp));
             const auto begin_T_mr = inverse(steam_trajectory->getPoseInterpolator(begin_time))->evaluate().matrix();
-            begin_T_ms = begin_T_mr * options.steam.T_sr.inverse();
+            const auto begin_T_ms = begin_T_mr * options.steam.T_sr.inverse();
             diff_trans += (current_estimate.begin_t - begin_T_ms.block<3, 1>(0, 3)).norm();
             diff_rot += AngularDistance(current_estimate.begin_R, begin_T_ms.block<3, 3>(0, 0));
             current_estimate.begin_R = begin_T_ms.block<3, 3>(0, 0);
             current_estimate.begin_t = begin_T_ms.block<3, 1>(0, 3);
 
+            Time end_time(static_cast<double>(trajectory[index_frame].end_timestamp));
             const auto end_T_mr = inverse(steam_trajectory->getPoseInterpolator(end_time))->evaluate().matrix();
-            end_T_ms = end_T_mr * options.steam.T_sr.inverse();
+            const auto end_T_ms = end_T_mr * options.steam.T_sr.inverse();
             diff_trans += (current_estimate.end_t - end_T_ms.block<3, 1>(0, 3)).norm();
             diff_rot += AngularDistance(current_estimate.end_R, end_T_ms.block<3, 3>(0, 0));
             current_estimate.end_R = end_T_ms.block<3, 3>(0, 0);
@@ -1332,8 +1343,11 @@ namespace ct_icp {
             timer[3].second->stop();
 
             // std::cout << "Difference: diff_rot=" << diff_rot << ", diff_trans=" << diff_trans << std::endl;
-            if ((index_frame > 1) && (diff_rot < options.threshold_orientation_norm &&
-                                      diff_trans < options.threshold_translation_norm)) {
+            if ((iter > options.steam.no_prev_state_iters) &&
+                (index_frame > 1) &&
+                (diff_rot < options.threshold_orientation_norm &&
+                 diff_trans < options.threshold_translation_norm)) {
+
                 summary.success = true;
                 summary.num_residuals_used = number_keypoints_used;
 

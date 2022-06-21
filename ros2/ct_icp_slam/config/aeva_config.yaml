@@ -1,12 +1,12 @@
 /**:
   ros__parameters:
-    log_dir: /tmp/ct_icp_slam
+    log_dir: /home/yuchen/ASRL/temp/doppler_odometry/boreas/aeva/steam
 
     # SLAM OPTIONS ----
     max_num_threads: 1
     save_trajectory: true
     suspend_on_failure: false
-    output_dir: /home/yuchen/ASRL/temp/cticp/boreas/aeva/steam_temp
+    output_dir: /home/yuchen/ASRL/temp/doppler_odometry/boreas/aeva/steam
     all_sequences: false
     sequence: "boreas-2022-05-13-10-30" # Ignored if use_all_sequences is true
     start_index: 0 # The initial frame index for the given sequence
@@ -21,7 +21,7 @@
       raw_points: true
       sampled_points: true
       map_points: true
-      T_sr_vec: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+      T_sr_vec: [-0.835, -0.39, 0.103, 0.0, 0.0, 0.0]  # davids result without side slip
 
     # DATASET OPTIONS ----
     dataset_options:
@@ -69,13 +69,16 @@
         ls_tolerant_min_threshold: 0.05 # The tolerant parameter for loss TOLERANT (for CERES solver)
 
         steam:
-          T_sr_vec: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+          T_sr_vec: [-0.835, -0.39, 0.103, 0.0, 0.0, 0.0]  # davids result without side slip
 
           qc_inv_diag: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
           lock_prev_pose: false
           lock_prev_vel: false
-          prev_pose_as_prior: true
+          prev_pose_as_prior: false
           prev_vel_as_prior: false
+
+          use_vp: false
+          vp_cov_diag: [1000.0, 1.0, 1.0, 1.0, 1.0, 1000.0]
 
           use_rv: false
           merge_p2p_rv: false
@@ -84,4 +87,4 @@
 
           verbose: false
           max_iterations: 1
-          num_threads: 1
+          num_threads: 10
