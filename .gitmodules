@@ -1,0 +1,8 @@
+[submodule "steam"]
+	path = steam
+	url = git@github.com:utiasASRL/steam.git
+	branch = velocity_interp_cov
+[submodule "lgmath"]
+	path = lgmath
+	url = git@github.com:utiasASRL/lgmath.git
+	branch = ros2-master
