@@ -927,7 +927,7 @@ namespace ct_icp {
             } else
                 pc = read_pointcloud(options_, sequence_id_, frame_id);
             for (auto &point: pc)
-                point.timestamp = frame_id + point.alpha_timestamp;
+                point.timestamp = (static_cast<double>(frame_id) + point.alpha_timestamp) / 10.0;
             return pc;
         }
 
@@ -950,7 +950,7 @@ namespace ct_icp {
             auto pc = read_pointcloud(options_, sequence_id_, frame_id);
             if (options_.dataset == KITTI_raw || options_.dataset == KITTI_CARLA || options_.dataset == KITTI) {
                 for (auto &point: pc) {
-                    point.timestamp = frame_id + point.alpha_timestamp;
+                    point.timestamp = (static_cast<double>(frame_id) + point.alpha_timestamp) / 10.0;
                 }
             }
             return pc;

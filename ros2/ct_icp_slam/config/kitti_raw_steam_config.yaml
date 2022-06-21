@@ -1,14 +1,14 @@
 /**:
   ros__parameters:
-    log_dir: /home/yuchen/ASRL/temp/doppler_odometry/boreas/aeva/steam_test
+    log_dir: /home/yuchen/ASRL/temp/doppler_odometry/kitti_raw/steam
 
     # SLAM OPTIONS ----
     max_num_threads: 1
     save_trajectory: true
     suspend_on_failure: false
-    output_dir: /home/yuchen/ASRL/temp/doppler_odometry/boreas/aeva/steam_test
+    output_dir: /home/yuchen/ASRL/temp/doppler_odometry/kitti_raw/steam
     all_sequences: false
-    sequence: "boreas-2022-05-13-10-30" # Ignored if use_all_sequences is true
+    sequence: "00" # Ignored if use_all_sequences is true
     start_index: 0 # The initial frame index for the given sequence
     max_frames: -1 # For negative values, all frames are computed
     with_viz3d: false
@@ -20,12 +20,11 @@
       raw_points: true
       sampled_points: true
       map_points: true
-      T_sr_vec: [-0.835, -0.39, 0.103, 0.0, 0.0, 0.0] # davids result without side slip
 
     # DATASET OPTIONS ----
     dataset_options:
-      dataset: AEVA # Options: [KITTI_raw / KITTI_CARLA / KITTI / KITTI-360 / BOREAS / AEVA]
-      root_path: /home/yuchen/ASRL/data/BOREAS # Set to the root path of kitti's directory
+      dataset: KITTI_raw # Options: [KITTI_raw / KITTI_CARLA / KITTI / KITTI-360 / BOREAS]
+      root_path: /home/yuchen/ASRL/data/KITTI_raw # Set to the root path of kitti's directory
       fail_if_incomplete: false
       min_dist_lidar_center: 5.0 # Suppresses points to close to the center of the sensor
       max_dist_lidar_center: 100.0 # Suppresses points to far from the center of the sensor
@@ -68,11 +67,12 @@
         debug_print: true
 
         steam:
-          T_sr_vec: [-0.835, -0.39, 0.103, 0.0, 0.0, 0.0] # davids result without side slip
+          T_sr_vec: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
-          qc_inv_diag: [0.01, 0.01, 0.01, 0.01, 0.01, 0.01]
-          lock_prev_pose: true
-          lock_prev_vel: true
+          qc_inv_diag: [100.0, 100.0, 100.0, 100.0, 100.0, 100.0]
+          add_prev_state: false
+          lock_prev_pose: false
+          lock_prev_vel: false
           prev_pose_as_prior: false
           prev_vel_as_prior: false
           num_extra_states: 0

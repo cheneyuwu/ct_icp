@@ -1024,6 +1024,8 @@ namespace ct_icp {
         ///
         const auto steam_trajectory = const_vel::Interface::MakeShared(options.steam.qc_inv, true);
         std::vector<StateVarBase::Ptr> steam_state_vars;
+        StateVarBase::Ptr begin_T_rm_var = nullptr;
+        StateVarBase::Ptr begin_w_mr_inr_var = nullptr;
 
         /// use previous trajectory to initialize steam state variables
         LOG(INFO) << "[CT_ICP_STEAM] prev_timestamp: " << trajectory[index_frame - 1].end_timestamp << std::endl;
@@ -1041,20 +1043,22 @@ namespace ct_icp {
             prev_w_mr_inr_cov = trajectory[index_frame - 1].end_w_mr_inr_cov;
         }
 #if false
-        auto prev_T_rm_var = SE3StateVar::MakeShared(prev_T_rm);
-        auto prev_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(prev_w_mr_inr);
-        steam_trajectory->add(prev_time, prev_T_rm_var, prev_w_mr_inr_var);
-        steam_state_vars.emplace_back(prev_T_rm_var);
-        steam_state_vars.emplace_back(prev_w_mr_inr_var);
-        if (options.steam.lock_prev_pose) prev_T_rm_var->locked() = true;
-        if (options.steam.lock_prev_vel) prev_w_mr_inr_var->locked() = true;
-        if (options.steam.prev_pose_as_prior) steam_trajectory->addPosePrior(prev_time, prev_T_rm, prev_T_rm_cov);
-        if (options.steam.prev_vel_as_prior) steam_trajectory->addVelocityPrior(prev_time, prev_w_mr_inr, prev_w_mr_inr_cov);
+        if (options.steam.add_prev_state) {
+            auto prev_T_rm_var = SE3StateVar::MakeShared(prev_T_rm);
+            auto prev_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(prev_w_mr_inr);
+            steam_trajectory->add(prev_time, prev_T_rm_var, prev_w_mr_inr_var);
+            steam_state_vars.emplace_back(prev_T_rm_var);
+            steam_state_vars.emplace_back(prev_w_mr_inr_var);
+            if (options.steam.lock_prev_pose) prev_T_rm_var->locked() = true;
+            if (options.steam.lock_prev_vel) prev_w_mr_inr_var->locked() = true;
+            if (options.steam.prev_pose_as_prior) steam_trajectory->addPosePrior(prev_time, prev_T_rm, prev_T_rm_cov);
+            if (options.steam.prev_vel_as_prior) steam_trajectory->addVelocityPrior(prev_time, prev_w_mr_inr, prev_w_mr_inr_cov);
+        }
 #endif
         /// New state for this frame
         LOG(INFO) << "[CT_ICP_STEAM] begin_timestamp: " << trajectory[index_frame].begin_timestamp << std::endl;
         LOG(INFO) << "[CT_ICP_STEAM] end_timestamp: " << trajectory[index_frame].end_timestamp << std::endl;
-        LOG(INFO) << "[CT_ICP_STEAM] totoal num states: " << (options.steam.num_extra_states + 2) << std::endl;
+        LOG(INFO) << "[CT_ICP_STEAM] total num states: " << (options.steam.num_extra_states + 2) << std::endl;
         const double begin_timestamp = trajectory[index_frame].begin_timestamp;
         const double end_timestamp = trajectory[index_frame].end_timestamp;
         const int num_states = options.steam.num_extra_states + 2;
@@ -1075,6 +1079,11 @@ namespace ct_icp {
             if (options.steam.use_vp) {
                 Eigen::Matrix<double, 6, 1> prior_w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
                 steam_trajectory->addVelocityPrior(knot_time, prior_w_mr_inr, options.steam.vp_cov);
+            }
+            // cache begin state in case it needs to be locked
+            if (i == 0) {
+                begin_T_rm_var = T_rm_var;
+                begin_w_mr_inr_var = w_mr_inr_var;
             }
         }
 
@@ -1119,21 +1128,35 @@ namespace ct_icp {
         num_iter_icp += options.steam.no_prev_state_iters;
         bool prev_state_added = false;
         for (int iter(0); iter < num_iter_icp; iter++) {
-
-            if (!prev_state_added && iter >= options.steam.no_prev_state_iters) {
-                LOG(INFO) << "[CT_ICP_STEAM] Adding previous state to trajectory." << std::endl;
-                auto prev_T_rm_var = SE3StateVar::MakeShared(prev_T_rm);
-                auto prev_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(prev_w_mr_inr);
-                steam_trajectory->add(prev_time, prev_T_rm_var, prev_w_mr_inr_var);
-                steam_state_vars.emplace_back(prev_T_rm_var);
-                steam_state_vars.emplace_back(prev_w_mr_inr_var);
-                if (options.steam.lock_prev_pose) prev_T_rm_var->locked() = true;
-                if (options.steam.lock_prev_vel) prev_w_mr_inr_var->locked() = true;
-                if (options.steam.prev_pose_as_prior) steam_trajectory->addPosePrior(prev_time, prev_T_rm, prev_T_rm_cov);
-                if (options.steam.prev_vel_as_prior) steam_trajectory->addVelocityPrior(prev_time, prev_w_mr_inr, prev_w_mr_inr_cov);
+#if true
+            if (!prev_state_added && options.steam.add_prev_state && iter >= options.steam.no_prev_state_iters) {
+                Time begin_time(static_cast<double>(trajectory[index_frame].begin_timestamp));
+                if (prev_time < begin_time) {
+                    LOG(INFO) << "[CT_ICP_STEAM] Adding previous state to trajectory:"
+                              << " prev=" << std::setprecision(6) << std::fixed << prev_time.seconds()
+                              << ", begin=" << std::setprecision(6) << std::fixed << begin_time.seconds() << std::endl;
+                    auto prev_T_rm_var = SE3StateVar::MakeShared(prev_T_rm);
+                    auto prev_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(prev_w_mr_inr);
+                    steam_trajectory->add(prev_time, prev_T_rm_var, prev_w_mr_inr_var);
+                    steam_state_vars.emplace_back(prev_T_rm_var);
+                    steam_state_vars.emplace_back(prev_w_mr_inr_var);
+                    if (options.steam.lock_prev_pose) prev_T_rm_var->locked() = true;
+                    if (options.steam.lock_prev_vel) prev_w_mr_inr_var->locked() = true;
+                    if (options.steam.prev_pose_as_prior) steam_trajectory->addPosePrior(prev_time, prev_T_rm, prev_T_rm_cov);
+                    if (options.steam.prev_vel_as_prior) steam_trajectory->addVelocityPrior(prev_time, prev_w_mr_inr, prev_w_mr_inr_cov);
+                } else if (prev_time == begin_time) {
+                    LOG(WARNING) << "[CT_ICP_STEAM] The end of last scan == beginning of current scan!" << std::endl;
+                    if (options.steam.lock_prev_pose) begin_T_rm_var->locked() = true;
+                    if (options.steam.lock_prev_vel) begin_w_mr_inr_var->locked() = true;
+                    if (options.steam.prev_pose_as_prior) steam_trajectory->addPosePrior(prev_time, prev_T_rm, prev_T_rm_cov);
+                    if (options.steam.prev_vel_as_prior) steam_trajectory->addVelocityPrior(prev_time, prev_w_mr_inr, prev_w_mr_inr_cov);
+                } else {
+                    LOG(ERROR) << "[CT_ICP_STEAM] The end of last scan > beginning of current scan - not possible!" << std::endl;
+                    throw std::runtime_error("[CT_ICP_STEAM] The end of last scan > beginning of current scan - not possible!");
+                }
                 prev_state_added = true;
             }
-
+#endif
             number_keypoints_used = 0;
 
             // initialize problem

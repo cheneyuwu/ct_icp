@@ -400,6 +400,7 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       LOG(INFO) << "Parameter " << prefix + "qc_inv_diag"
                 << " = " << steam.qc_inv.diagonal().transpose() << std::endl;
 
+      ROS2_PARAM_CLAUSE(node, steam, prefix, add_prev_state, bool);
       ROS2_PARAM_CLAUSE(node, steam, prefix, lock_prev_pose, bool);
       ROS2_PARAM_CLAUSE(node, steam, prefix, lock_prev_vel, bool);
       ROS2_PARAM_CLAUSE(node, steam, prefix, prev_pose_as_prior, bool);
