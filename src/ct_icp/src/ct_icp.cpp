@@ -1296,7 +1296,8 @@ namespace ct_icp {
                     LOG(INFO) << summary.error_log;
 
                 summary.success = false;
-                return summary;
+
+                break; // return summary;
             }
 
             timer[1].second->start();
@@ -1366,20 +1367,19 @@ namespace ct_icp {
 
             timer[3].second->stop();
 
-            // std::cout << "Difference: diff_rot=" << diff_rot << ", diff_trans=" << diff_trans << std::endl;
+            summary.success = true;
+            summary.num_residuals_used = number_keypoints_used;
+
             if ((iter > options.steam.no_prev_state_iters) &&
                 (index_frame > 1) &&
                 (diff_rot < options.threshold_orientation_norm &&
                  diff_trans < options.threshold_translation_norm)) {
 
-                summary.success = true;
-                summary.num_residuals_used = number_keypoints_used;
-
                 if (options.debug_print) {
                     LOG(INFO) << "CT_ICP: Finished with N=" << iter << " ICP iterations" << std::endl;
                 }
 
-                return summary;
+                break; // return summary;
             }
         }
 
@@ -1392,8 +1392,6 @@ namespace ct_icp {
             LOG(INFO) << "Translation Begin: " << trajectory[index_frame].begin_t.transpose() << std::endl;
             LOG(INFO) << "Translation End: " << trajectory[index_frame].end_t.transpose() << std::endl;
         }
-        summary.success = true;
-        summary.num_residuals_used = number_keypoints_used;
 
         return summary;
     }
