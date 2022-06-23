@@ -1024,6 +1024,7 @@ namespace ct_icp {
         ///
         const auto steam_trajectory = const_vel::Interface::MakeShared(options.steam.qc_inv, true);
         std::vector<StateVarBase::Ptr> steam_state_vars;
+        std::vector<BaseCostTerm::ConstPtr> prior_cost_terms;
         StateVarBase::Ptr begin_T_rm_var = nullptr;
         StateVarBase::Ptr begin_w_mr_inr_var = nullptr;
 
@@ -1077,8 +1078,10 @@ namespace ct_icp {
             steam_state_vars.emplace_back(w_mr_inr_var);
             //
             if (options.steam.use_vp) {
-                Eigen::Matrix<double, 6, 1> prior_w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
-                steam_trajectory->addVelocityPrior(knot_time, prior_w_mr_inr, options.steam.vp_cov);
+                const auto error_func = vspace_error<6>(w_mr_inr_var, Eigen::Matrix<double, 6, 1>::Zero());
+                const auto noise_model = StaticNoiseModel<6>::MakeShared(options.steam.vp_cov);
+                const auto loss_func = std::make_shared<L2LossFunc>();
+                prior_cost_terms.emplace_back(WeightedLeastSqCostTerm<6>::MakeShared(error_func, noise_model, loss_func));
             }
             // cache begin state in case it needs to be locked
             if (i == 0) {
@@ -1126,15 +1129,21 @@ namespace ct_icp {
 
         int num_iter_icp = index_frame < options.init_num_frames ? 15 : options.num_iters_icp;
         num_iter_icp += options.steam.no_prev_state_iters;
-        bool prev_state_added = false;
+        int ready_to_add_prev_state = 0;  // 0=not ready, 1=ready, 2=already added
         for (int iter(0); iter < num_iter_icp; iter++) {
+            if (!options.steam.add_prev_state)
+                ready_to_add_prev_state = 2;  // assume already added
+            if (iter >= options.steam.no_prev_state_iters && ready_to_add_prev_state == 0)
+                ready_to_add_prev_state = 1;
+            LOG_IF(INFO, (ready_to_add_prev_state == 1)) << "Iteration " << iter << " with ready_to_add_prev_state set to 1" << std::endl;
+
 #if true
-            if (!prev_state_added && options.steam.add_prev_state && iter >= options.steam.no_prev_state_iters) {
+            if (options.steam.add_prev_state && ready_to_add_prev_state == 1) {
                 Time begin_time(static_cast<double>(trajectory[index_frame].begin_timestamp));
                 if (prev_time < begin_time) {
                     LOG(INFO) << "[CT_ICP_STEAM] Adding previous state to trajectory:"
-                              << " prev=" << std::setprecision(6) << std::fixed << prev_time.seconds()
-                              << ", begin=" << std::setprecision(6) << std::fixed << begin_time.seconds() << std::endl;
+                              << " delta t=" << std::setprecision(8) << std::fixed
+                              << (begin_time - prev_time).seconds() << std::endl;
                     auto prev_T_rm_var = SE3StateVar::MakeShared(prev_T_rm);
                     auto prev_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(prev_w_mr_inr);
                     steam_trajectory->add(prev_time, prev_T_rm_var, prev_w_mr_inr_var);
@@ -1154,7 +1163,7 @@ namespace ct_icp {
                     LOG(ERROR) << "[CT_ICP_STEAM] The end of last scan > beginning of current scan - not possible!" << std::endl;
                     throw std::runtime_error("[CT_ICP_STEAM] The end of last scan > beginning of current scan - not possible!");
                 }
-                prev_state_added = true;
+                ready_to_add_prev_state = 2;
             }
 #endif
             number_keypoints_used = 0;
@@ -1168,6 +1177,8 @@ namespace ct_icp {
 
             // add prior cost terms
             steam_trajectory->addPriorCostTerms(problem);
+            for (const auto& prior_cost_term : prior_cost_terms)
+                problem.addCostTerm(prior_cost_term);
 
             timer[0].second->start();
 
@@ -1306,7 +1317,14 @@ namespace ct_icp {
             using SolverType = VanillaGaussNewtonSolver;
             SolverType::Params params;
             params.verbose = options.steam.verbose;
-            params.maxIterations = (unsigned int)options.steam.max_iterations;
+            if (options.steam.add_prev_state
+                && (ready_to_add_prev_state == 2)
+                && (!options.steam.association_after_adding_prev_state)) {
+                LOG(INFO) << "Changing maxIteration to 20 due to no re-association." << std::endl;
+                params.maxIterations = 20;
+            } else {
+                params.maxIterations = (unsigned int)options.steam.max_iterations;
+            }
             SolverType solver(&problem, params);
             try {
                 solver.optimize();
@@ -1370,8 +1388,7 @@ namespace ct_icp {
             summary.success = true;
             summary.num_residuals_used = number_keypoints_used;
 
-            if ((iter > options.steam.no_prev_state_iters) &&
-                (index_frame > 1) &&
+            if ((index_frame > 1) &&
                 (diff_rot < options.threshold_orientation_norm &&
                  diff_trans < options.threshold_translation_norm)) {
 
@@ -1379,8 +1396,16 @@ namespace ct_icp {
                     LOG(INFO) << "CT_ICP: Finished with N=" << iter << " ICP iterations" << std::endl;
                 }
 
-                break; // return summary;
+                if (ready_to_add_prev_state == 0)
+                    ready_to_add_prev_state = 1;
+                else
+                    break; // return summary;
             }
+
+            if (options.steam.add_prev_state
+                && ready_to_add_prev_state == 2
+                && (!options.steam.association_after_adding_prev_state))
+                break;
         }
 
         if (options.debug_print) {

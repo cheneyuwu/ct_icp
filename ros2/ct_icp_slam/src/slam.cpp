@@ -407,6 +407,7 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       ROS2_PARAM_CLAUSE(node, steam, prefix, prev_vel_as_prior, bool);
       ROS2_PARAM_CLAUSE(node, steam, prefix, num_extra_states, int);
       ROS2_PARAM_CLAUSE(node, steam, prefix, no_prev_state_iters, int);
+      ROS2_PARAM_CLAUSE(node, steam, prefix, association_after_adding_prev_state, bool);
 
       ROS2_PARAM_CLAUSE(node, steam, prefix, use_vp, bool);
 

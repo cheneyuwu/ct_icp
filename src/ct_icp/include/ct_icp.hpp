@@ -138,6 +138,7 @@ namespace ct_icp {
             Eigen::Matrix<double, 4, 4> T_sr = Eigen::Matrix<double, 4, 4>::Identity();
             // trajectory
             Eigen::Matrix<double, 6, 6> qc_inv = Eigen::Matrix<double, 6, 6>::Identity();
+            int num_extra_states = 0;
             //
             bool add_prev_state = false;
             bool lock_prev_pose = false;
@@ -145,8 +146,8 @@ namespace ct_icp {
             bool prev_pose_as_prior = false;
             bool prev_vel_as_prior = false;
             //
-            int num_extra_states = 0;
             int no_prev_state_iters = 0;
+            bool association_after_adding_prev_state = true;
             // velocity prior (no side slipping)
             bool use_vp = false;
             Eigen::Matrix<double, 6, 6> vp_cov = Eigen::Matrix<double, 6, 6>::Identity();
