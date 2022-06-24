@@ -25,7 +25,7 @@
     # DATASET OPTIONS ----
     dataset_options:
       dataset: AEVA # Options: [KITTI_raw / KITTI_CARLA / KITTI / KITTI-360 / BOREAS / AEVA]
-      root_path: /home/yuchen/ASRL/data/BOREAS # Set to the root path of kitti's directory
+      root_path: /home/yuchen/ASRL/data/boreas/sequences # Set to the root path of kitti's directory
       fail_if_incomplete: false
       min_dist_lidar_center: 5.0 # Suppresses points to close to the center of the sensor
       max_dist_lidar_center: 100.0 # Suppresses points to far from the center of the sensor

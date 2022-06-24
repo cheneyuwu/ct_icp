@@ -30,9 +30,9 @@ ros2 run ct_icp_slam ct_icp_slam --ros-args --params-file ${WORKING_DIR}/ros2/ct
 source ${WORKING_DIR}/ros2/install/setup.bash
 ros2 run ct_icp_slam ct_icp_slam --ros-args --params-file ${WORKING_DIR}/ros2/ct_icp_slam/config/boreas_config.yaml
 ## Evaluate odometry
-DATASET_DIR=/home/yuchen/ASRL/data/boreas/sequences
-RESULT_DIR=/home/yuchen/ASRL/temp/cticp/boreas/lidar/elastic
-source /home/yuchen/ASRL/venv/bin/activate
+DATASET_DIR=${HOME}/ASRL/data/boreas/sequences
+RESULT_DIR=${HOME}/ASRL/temp/cticp/boreas/lidar/elastic
+source ${HOME}/ASRL/venv/bin/activate
 python generate_boreas_odometry_result.py --dataset ${DATASET_DIR} --path ${RESULT_DIR} --sensor velodyne
 python -m pyboreas.eval.odometry --gt ${DATASET_DIR} --pred ${RESULT_DIR}/boreas_odometry_result
 
@@ -43,15 +43,15 @@ source ${WORKING_DIR}/ros2/install/setup.bash
 ros2 run ct_icp_slam ct_icp_slam --ros-args --params-file ${WORKING_DIR}/ros2/ct_icp_slam/config/aeva_elastic_config.yaml
 
 ## Evaluate odometry
-DATASET_DIR=/home/yuchen/ASRL/data/boreas/sequences
-RESULT_DIR=/home/yuchen/ASRL/temp/doppler_odometry/boreas/aeva/elastic # change output directory
-source /home/yuchen/ASRL/venv/bin/activate
-cd /home/yuchen/ASRL/ct_icp/ros2/ct_icp_slam/script
+source ${WORKING_DIR}/venv/bin/activate
+cd ${WORKING_DIR}/ros2/ct_icp_slam/script
+DATASET_DIR=${HOME}/ASRL/data/boreas/sequences
+RESULT_DIR=${HOME}/ASRL/temp/doppler_odometry/boreas/aeva/elastic # change output directory
 python generate_boreas_odometry_result.py --dataset ${DATASET_DIR} --path ${RESULT_DIR} --sensor aeva
 python -m pyboreas.eval.odometry_aeva --gt ${DATASET_DIR} --pred ${RESULT_DIR}/boreas_odometry_result
 
 ## Visualize a path
+source ${WORKING_DIR}/venv/bin/activate
 source /opt/ros/galactic/setup.bash
-source /home/yuchen/ASRL/venv/bin/activate
-cd /home/yuchen/ASRL/ct_icp/ros2/ct_icp_slam/script
+cd ${WORKING_DIR}/ros2/ct_icp_slam/script
 python plot_boreas_poses_rviz.py # modify directory inside
