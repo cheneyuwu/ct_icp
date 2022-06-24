@@ -1,5 +1,26 @@
 #!/bin/bash
 
+## build docker image
+# docker build -t ct_icp \
+#   --build-arg USERID=$(id -u) \
+#   --build-arg GROUPID=$(id -g) \
+#   --build-arg USERNAME=$(whoami) \
+#   --build-arg HOMEDIR=${HOME} .
+
+## run docker image (example)
+# docker run -it --name ct_icp \
+#   --privileged \
+#   --network=host \
+#   --gpus all \
+#   -e DISPLAY=$DISPLAY \
+#   -v /tmp/.X11-unix:/tmp/.X11-unix \
+#   -v ${HOME}:${HOME}:rw \
+#   -v ${HOME}/ASRL:${HOME}/ASRL:rw \
+#   -v ${HOME}/ASRL/data/boreas:${HOME}/ASRL/data/boreas \
+#   -v /media/yuchen/T7/ASRL/data/kitti_raw:${HOME}/ASRL/data/kitti_raw \
+# 	-v /media/yuchen/T7/ASRL/data/kitti_360:${HOME}/ASRL/data/kitti_360 \
+#   ct_icp
+
 BUILD_TYPE=$1
 GENERATOR=$2
 WITH_PYTHON_BINDING=$3

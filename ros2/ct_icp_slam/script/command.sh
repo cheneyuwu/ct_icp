@@ -1,6 +1,6 @@
 # ROOT directory of this repository
 WORKING_DIR=$(pwd)
-WORKING_DIR=/home/yuchen/ASRL/ct_icp
+WORKING_DIR=${HOME}/ASRL/ct_icp
 
 EXTERNAL_ROOT=${WORKING_DIR}/cmake-build-Release/external/install/Release
 LGMATH_ROOT=${WORKING_DIR}/cmake-build-Release/lgmath/install/Release

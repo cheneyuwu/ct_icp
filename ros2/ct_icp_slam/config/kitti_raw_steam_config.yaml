@@ -58,8 +58,8 @@
         beta_constant_velocity: 0.001
 
         solver: STEAM # Options: [GN=Gauss-Newton, CERES, STEAM]
-        loss_function: HUBER # Options: [STANDARD, CAUCHY, HUBER, TOLERANT, TRUNCATED] (for CERES solver)
-        ls_max_num_iters: 1 # The number of steps performed for each iteration of the ICP (for CERES solver)
+        loss_function: CAUCHY # Options: [STANDARD, CAUCHY, HUBER, TOLERANT, TRUNCATED] (for CERES solver)
+        ls_max_num_iters: 5 # The number of steps performed for each iteration of the ICP (for CERES solver)
         ls_num_threads: 10 # The number of threads to build and solve the least square system (for CERES solver)
         ls_sigma: 0.1 # The sigma parameter for loss CAUCHY, HUBER, TOLERANT, TRUNCATED (for CERES solver)
         ls_tolerant_min_threshold: 0.05 # The tolerant parameter for loss TOLERANT (for CERES solver)
