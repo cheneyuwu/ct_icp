@@ -118,10 +118,10 @@ struct SLAMOptions {
   receiver = node->declare_parameter<type>(prefix + #param, receiver);
 #define ROS2_PARAM(node, receiver, prefix, param, type)   \
   ROS2_PARAM_NO_LOG(node, receiver, prefix, param, type); \
-  LOG(INFO) << "Parameter " << prefix + #param << " = " << receiver << std::endl;
+  LOG(WARNING) << "Parameter " << prefix + #param << " = " << receiver << std::endl;
 #define ROS2_PARAM_CLAUSE(node, config, prefix, param, type)                   \
   config.param = node->declare_parameter<type>(prefix + #param, config.param); \
-  LOG(INFO) << "Parameter " << prefix + #param << " = " << config.param << std::endl;
+  LOG(WARNING) << "Parameter " << prefix + #param << " = " << config.param << std::endl;
 
 ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
   ct_icp::SLAMOptions options;
@@ -165,7 +165,7 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       throw std::invalid_argument{"T_sr malformed. Must be 6 elements!"};
     if (T_sr_vec.size() == 6)
       visualization_options.T_sr = lgmath::se3::vec2tran(Eigen::Matrix<double, 6, 1>(T_sr_vec.data()));
-    LOG(INFO) << "Parameter " << prefix + "T_sr"
+    LOG(WARNING) << "Parameter " << prefix + "T_sr"
               << " = " << std::endl
               << visualization_options.T_sr << std::endl;
   }
@@ -386,7 +386,7 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       if ((T_sr_vec.size() != 6) && (T_sr_vec.size() != 0))
         throw std::invalid_argument{"T_sr malformed. Must be 6 elements!"};
       if (T_sr_vec.size() == 6) steam.T_sr = lgmath::se3::vec2tran(Eigen::Matrix<double, 6, 1>(T_sr_vec.data()));
-      LOG(INFO) << "Parameter " << prefix + "T_sr"
+      LOG(WARNING) << "Parameter " << prefix + "T_sr"
                 << " = " << std::endl
                 << steam.T_sr << std::endl;
 
@@ -397,7 +397,7 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       if (qc_inv_diag.size() == 6)
         steam.qc_inv.diagonal() << qc_inv_diag[0], qc_inv_diag[1], qc_inv_diag[2], qc_inv_diag[3], qc_inv_diag[4],
             qc_inv_diag[5];
-      LOG(INFO) << "Parameter " << prefix + "qc_inv_diag"
+      LOG(WARNING) << "Parameter " << prefix + "qc_inv_diag"
                 << " = " << steam.qc_inv.diagonal().transpose() << std::endl;
 
       ROS2_PARAM_CLAUSE(node, steam, prefix, add_prev_state, bool);
@@ -418,7 +418,7 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       if (vp_cov_diag.size() == 6)
         steam.vp_cov.diagonal() << vp_cov_diag[0], vp_cov_diag[1], vp_cov_diag[2], vp_cov_diag[3], vp_cov_diag[4],
             vp_cov_diag[5];
-      LOG(INFO) << "Parameter " << prefix + "vp_cov_diag"
+      LOG(WARNING) << "Parameter " << prefix + "vp_cov_diag"
                 << " = " << steam.vp_cov.diagonal().transpose() << std::endl;
 
       ROS2_PARAM_CLAUSE(node, steam, prefix, use_rv, bool);
@@ -479,7 +479,7 @@ int main(int argc, char **argv) {
   FLAGS_alsologtostderr = 1;
   fs::create_directories(FLAGS_log_dir);
   google::InitGoogleLogging(argv[0]);
-  LOG(INFO) << "Logging to " << FLAGS_log_dir;
+  LOG(WARNING) << "Logging to " << FLAGS_log_dir;
 
   // Read parameters
   const auto options = ct_icp::load_options(node);
@@ -492,8 +492,8 @@ int main(int argc, char **argv) {
 
   // Build the Output_dir
   if (!fs::exists(options.dataset_options.root_path))
-    LOG(INFO) << "The directory " << options.dataset_options.root_path << " does not exist";
-  LOG(INFO) << "Creating directory " << options.output_dir << std::endl;
+    LOG(WARNING) << "The directory " << options.dataset_options.root_path << " does not exist";
+  LOG(WARNING) << "Creating directory " << options.output_dir << std::endl;
   fs::create_directories(options.output_dir);
 
   // Get the dataset
@@ -540,7 +540,7 @@ int main(int argc, char **argv) {
     double avg_number_of_attempts = 0.0;
     int frame_id(0);
     if (!options.all_sequences && options.start_index > 0) {
-      LOG(INFO) << "Starting at frame " << options.start_index << std::endl;
+      LOG(WARNING) << "Starting at frame " << options.start_index << std::endl;
       iterator_ptr->SetInitFrame(options.start_index);
     }
     while (iterator_ptr->HasNext() && (options.max_frames < 0 || frame_id < options.max_frames)) {
@@ -601,7 +601,7 @@ int main(int argc, char **argv) {
       }
 
       if (!rclcpp::ok()) {
-        LOG(INFO) << "Shutting down due to ctrl-c." << std::endl;
+        LOG(WARNING) << "Shutting down due to ctrl-c." << std::endl;
         return 0;
       }
 
@@ -652,20 +652,20 @@ int main(int argc, char **argv) {
       seq_error.average_elapsed_ms = registration_elapsed_ms / frame_id;
       seq_error.mean_num_attempts = avg_number_of_attempts;
 
-      LOG(INFO) << "[RESULTS] Sequence " << _sequence_name << std::endl;
+      LOG(WARNING) << "[RESULTS] Sequence " << _sequence_name << std::endl;
       if (!valid_trajectory) {
-        LOG(INFO) << "Invalid Trajectory, Failed after " << ground_truth_poses.size() << std::endl;
-        LOG(INFO) << "Num Poses : " << seq_error.mean_rpe << std::endl;
+        LOG(WARNING) << "Invalid Trajectory, Failed after " << ground_truth_poses.size() << std::endl;
+        LOG(WARNING) << "Num Poses : " << seq_error.mean_rpe << std::endl;
       }
-      LOG(INFO) << "Average Number of Attempts : " << avg_number_of_attempts << std::endl;
-      LOG(INFO) << "Mean RPE : " << seq_error.mean_rpe << std::endl;
-      LOG(INFO) << "Mean APE : " << seq_error.mean_ape << std::endl;
-      LOG(INFO) << "Max APE : " << seq_error.max_ape << std::endl;
-      LOG(INFO) << "Mean Local Error : " << seq_error.mean_local_err << std::endl;
-      LOG(INFO) << "Max Local Error : " << seq_error.max_local_err << std::endl;
-      LOG(INFO) << "Index Max Local Error : " << seq_error.index_max_local_err << std::endl;
-      LOG(INFO) << "Average Duration : " << registration_elapsed_ms / frame_id << std::endl;
-      LOG(INFO) << std::endl;
+      LOG(WARNING) << "Average Number of Attempts : " << avg_number_of_attempts << std::endl;
+      LOG(WARNING) << "Mean RPE : " << seq_error.mean_rpe << std::endl;
+      LOG(WARNING) << "Mean APE : " << seq_error.mean_ape << std::endl;
+      LOG(WARNING) << "Max APE : " << seq_error.max_ape << std::endl;
+      LOG(WARNING) << "Mean Local Error : " << seq_error.mean_local_err << std::endl;
+      LOG(WARNING) << "Max Local Error : " << seq_error.max_local_err << std::endl;
+      LOG(WARNING) << "Index Max Local Error : " << seq_error.index_max_local_err << std::endl;
+      LOG(WARNING) << "Average Duration : " << registration_elapsed_ms / frame_id << std::endl;
+      LOG(WARNING) << std::endl;
 
       average_rpe_on_seq += seq_error.mean_rpe;
 
@@ -680,7 +680,7 @@ int main(int argc, char **argv) {
   }
 
   if (dataset_with_gt) {
-    LOG(INFO) << std::endl;
+    LOG(WARNING) << std::endl;
     double all_seq_rpe_t = 0.0;
     double all_seq_rpe_r = 0.0;
     double num_total_errors = 0.0;
@@ -691,13 +691,13 @@ int main(int argc, char **argv) {
         num_total_errors += 1;
       }
     }
-    LOG(INFO) << "KITTI metric translation/rotation : " << (all_seq_rpe_t / num_total_errors) * 100 << " "
+    LOG(WARNING) << "KITTI metric translation/rotation : " << (all_seq_rpe_t / num_total_errors) * 100 << " "
               << (all_seq_rpe_r / num_total_errors) * 180.0 / M_PI << std::endl;
-    LOG(INFO) << "Average RPE on seq : " << average_rpe_on_seq / nb_seq_with_gt;
+    LOG(WARNING) << "Average RPE on seq : " << average_rpe_on_seq / nb_seq_with_gt;
   }
 
-  LOG(INFO) << std::endl;
-  LOG(INFO) << "Average registration time for all sequences (ms) : "
+  LOG(WARNING) << std::endl;
+  LOG(WARNING) << "Average registration time for all sequences (ms) : "
             << all_seq_registration_elapsed_ms / all_seq_num_frames << std::endl;
 
   // rclcpp::spin(node);

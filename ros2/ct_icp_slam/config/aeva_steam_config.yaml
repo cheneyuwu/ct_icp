@@ -1,13 +1,13 @@
 /**:
   ros__parameters:
-    log_dir: /home/yuchen/ASRL/temp/doppler_odometry/boreas/aeva/steam_test
+    log_dir: /home/yuchen/ASRL/temp/doppler_odometry/boreas/aeva/steam
 
     # SLAM OPTIONS ----
     max_num_threads: 1
     save_trajectory: true
     suspend_on_failure: false
-    output_dir: /home/yuchen/ASRL/temp/doppler_odometry/boreas/aeva/steam_test
-    all_sequences: false
+    output_dir: /home/yuchen/ASRL/temp/doppler_odometry/boreas/aeva/steam
+    all_sequences: true
     sequence: "boreas-2022-05-13-10-30" # Ignored if use_all_sequences is true
     start_index: 0 # The initial frame index for the given sequence
     max_frames: -1 # For negative values, all frames are computed

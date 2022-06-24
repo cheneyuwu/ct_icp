@@ -1140,7 +1140,7 @@ namespace ct_icp {
 #if true
             if (options.steam.add_prev_state && ready_to_add_prev_state == 1) {
                 Time begin_time(static_cast<double>(trajectory[index_frame].begin_timestamp));
-                if (prev_time < begin_time) {
+                if (prev_time < (begin_time - 0.001)) {
                     LOG(INFO) << "[CT_ICP_STEAM] Adding previous state to trajectory:"
                               << " delta t=" << std::setprecision(8) << std::fixed
                               << (begin_time - prev_time).seconds() << std::endl;
@@ -1153,12 +1153,12 @@ namespace ct_icp {
                     if (options.steam.lock_prev_vel) prev_w_mr_inr_var->locked() = true;
                     if (options.steam.prev_pose_as_prior) steam_trajectory->addPosePrior(prev_time, prev_T_rm, prev_T_rm_cov);
                     if (options.steam.prev_vel_as_prior) steam_trajectory->addVelocityPrior(prev_time, prev_w_mr_inr, prev_w_mr_inr_cov);
-                } else if (prev_time == begin_time) {
-                    LOG(WARNING) << "[CT_ICP_STEAM] The end of last scan == beginning of current scan!" << std::endl;
+                } else if (prev_time <= begin_time) {
+                    LOG(INFO) << "[CT_ICP_STEAM] The end of last scan == beginning of current scan!" << std::endl;
                     if (options.steam.lock_prev_pose) begin_T_rm_var->locked() = true;
                     if (options.steam.lock_prev_vel) begin_w_mr_inr_var->locked() = true;
-                    if (options.steam.prev_pose_as_prior) steam_trajectory->addPosePrior(prev_time, prev_T_rm, prev_T_rm_cov);
-                    if (options.steam.prev_vel_as_prior) steam_trajectory->addVelocityPrior(prev_time, prev_w_mr_inr, prev_w_mr_inr_cov);
+                    if (options.steam.prev_pose_as_prior) steam_trajectory->addPosePrior(begin_time, prev_T_rm, prev_T_rm_cov);
+                    if (options.steam.prev_vel_as_prior) steam_trajectory->addVelocityPrior(begin_time, prev_w_mr_inr, prev_w_mr_inr_cov);
                 } else {
                     LOG(ERROR) << "[CT_ICP_STEAM] The end of last scan > beginning of current scan - not possible!" << std::endl;
                     throw std::runtime_error("[CT_ICP_STEAM] The end of last scan > beginning of current scan - not possible!");
