@@ -9,5 +9,8 @@ imgui.ini
 *.exe
 slam
 
+#
+venv
+
 # Commit the .gitignore
 !.gitignore

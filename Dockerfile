@@ -63,6 +63,7 @@ RUN apt update && apt install -q -y \
 USER ${USERID}:${GROUPID}
 
 ## run the container (example command)
+## local
 # docker run -it --name ct_icp \
 #   --privileged \
 #   --network=host \
@@ -73,4 +74,14 @@ USER ${USERID}:${GROUPID}
 #   -v ${HOME}/ASRL:${HOME}/ASRL:rw \
 #   -v ${HOME}/ASRL/data/boreas/sequences:${HOME}/ASRL/data/BOREAS \
 #   -v /media/yuchen/T7/ASRL/data/KITTI_raw:${HOME}/ASRL/data/KITTI_raw \
+#   ct_icp
+## obelisk
+# docker run -it --name yuchen_ct_icp \
+#   --privileged \
+#   --network=host \
+#   --gpus all \
+#   -e DISPLAY=$DISPLAY \
+#   -v /tmp/.X11-unix:/tmp/.X11-unix \
+#   -v ${HOME}:${HOME}:rw \
+#   -v ${HOME}/ASRL:${HOME}/ASRL:rw \
 #   ct_icp
