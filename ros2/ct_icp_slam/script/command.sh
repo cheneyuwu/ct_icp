@@ -40,7 +40,7 @@ python -m pyboreas.eval.odometry --gt ${DATASET_DIR} --pred ${RESULT_DIR}/boreas
 ## Run odometry
 # - change config file
 source ${WORKING_DIR}/ros2/install/setup.bash
-ros2 run ct_icp_slam ct_icp_slam --ros-args --params-file ${WORKING_DIR}/ros2/ct_icp_slam/config/aeva_gn_config.yaml
+ros2 run ct_icp_slam ct_icp_slam --ros-args --params-file ${WORKING_DIR}/ros2/ct_icp_slam/config/aeva_elastic_config.yaml
 
 ## Evaluate odometry
 DATASET_DIR=/home/yuchen/ASRL/data/boreas/sequences
