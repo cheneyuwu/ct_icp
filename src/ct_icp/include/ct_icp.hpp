@@ -141,6 +141,7 @@ namespace ct_icp {
             int num_extra_states = 0;
             //
             bool add_prev_state = false;
+            int num_extra_prev_states = 0;
             bool lock_prev_pose = false;
             bool lock_prev_vel = false;
             bool prev_pose_as_prior = false;
