@@ -425,13 +425,13 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       std::string p2p_loss_func;
       ROS2_PARAM(node, p2p_loss_func, prefix, p2p_loss_func, std::string);
       if (p2p_loss_func == "L2")
-        ct_icp_options.p2p_loss_func = STEAM_LOSS_FUNC::L2;
+        steam.p2p_loss_func = STEAM_LOSS_FUNC::L2;
       else if (p2p_loss_func == "DCS")
-        ct_icp_options.p2p_loss_func = STEAM_LOSS_FUNC::DCS;
+        steam.p2p_loss_func = STEAM_LOSS_FUNC::DCS;
       else if (p2p_loss_func == "CAUCHY")
-        ct_icp_options.p2p_loss_func = STEAM_LOSS_FUNC::CAUCHY;
+        steam.p2p_loss_func = STEAM_LOSS_FUNC::CAUCHY;
       else if (p2p_loss_func == "GM")
-        ct_icp_options.p2p_loss_func = STEAM_LOSS_FUNC::GM;
+        steam.p2p_loss_func = STEAM_LOSS_FUNC::GM;
       else {
         LOG(WARNING) << "Parameter " << prefix + "p2p_loss_func"
                      << " not specified. Using default value: "
