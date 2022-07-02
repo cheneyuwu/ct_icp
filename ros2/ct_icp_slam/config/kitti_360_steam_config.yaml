@@ -69,7 +69,7 @@
         steam:
           T_sr_vec: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
-          qc_inv_diag: [0.05, 0.05, 5.0, 5.0, 5.0, 0.05]
+          qc_inv_diag: [0.01, 0.01, 5.0, 5.0, 5.0, 0.01]
           num_extra_states: 0
           add_prev_state: true
           num_extra_prev_states: 0
@@ -79,6 +79,9 @@
           prev_vel_as_prior: true
           no_prev_state_iters: 10
           association_after_adding_prev_state: false
+
+          p2p_loss_func: GM # Options: [L2, DCS, CAUCHY, GM]
+          p2p_loss_sigma: 0.1
 
           use_vp: false
           vp_cov_diag: [1000.0, 0.001, 0.001, 1.0, 1.0, 1000.0]

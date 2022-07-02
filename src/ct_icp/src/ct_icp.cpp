@@ -1288,10 +1288,21 @@ namespace ct_icp {
                         const auto &T_ms_intp_eval = T_ms_intp_eval_vec[i];
                         const auto error_func = p2p::p2pError(T_ms_intp_eval, closest_point, keypoint.raw_pt);
 
-                        // const auto loss_func = L2LossFunc::MakeShared();
-                        // const auto loss_func = DcsLossFunc::MakeShared(options.steam.rv_loss_threshold);
-                        // const auto loss_func = CauchyLossFunc::MakeShared(options.steam.rv_loss_threshold);
-                        const auto loss_func = GemanMcClureLossFunc::MakeShared(options.steam.rv_loss_threshold);
+                        const auto loss_func = [&options]() -> BaseLossFunc::Ptr {
+                            switch (options.steam.p2p_loss_func) {
+                                case STEAM_LOSS_FUNC::L2:
+                                    return L2LossFunc::MakeShared();
+                                case STEAM_LOSS_FUNC::DCS:
+                                    return DcsLossFunc::MakeShared(options.steam.p2p_loss_sigma);
+                                case STEAM_LOSS_FUNC::CAUCHY:
+                                    return CauchyLossFunc::MakeShared(options.steam.p2p_loss_sigma);
+                                case STEAM_LOSS_FUNC::GM:
+                                    return GemanMcClureLossFunc::MakeShared(options.steam.p2p_loss_sigma);
+                                default:
+                                    return nullptr;
+                            }
+                            return nullptr;
+                        }();
 
                         const auto cost = WeightedLeastSqCostTerm<3>::MakeShared(error_func, noise_model, loss_func);
 

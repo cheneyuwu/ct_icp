@@ -166,8 +166,8 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
     if (T_sr_vec.size() == 6)
       visualization_options.T_sr = lgmath::se3::vec2tran(Eigen::Matrix<double, 6, 1>(T_sr_vec.data()));
     LOG(WARNING) << "Parameter " << prefix + "T_sr"
-              << " = " << std::endl
-              << visualization_options.T_sr << std::endl;
+                 << " = " << std::endl
+                 << visualization_options.T_sr << std::endl;
   }
 
   /// dataset options
@@ -387,8 +387,8 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
         throw std::invalid_argument{"T_sr malformed. Must be 6 elements!"};
       if (T_sr_vec.size() == 6) steam.T_sr = lgmath::se3::vec2tran(Eigen::Matrix<double, 6, 1>(T_sr_vec.data()));
       LOG(WARNING) << "Parameter " << prefix + "T_sr"
-                << " = " << std::endl
-                << steam.T_sr << std::endl;
+                   << " = " << std::endl
+                   << steam.T_sr << std::endl;
 
       std::vector<double> qc_inv_diag;
       ROS2_PARAM_NO_LOG(node, qc_inv_diag, prefix, qc_inv_diag, std::vector<double>);
@@ -398,7 +398,7 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
         steam.qc_inv.diagonal() << qc_inv_diag[0], qc_inv_diag[1], qc_inv_diag[2], qc_inv_diag[3], qc_inv_diag[4],
             qc_inv_diag[5];
       LOG(WARNING) << "Parameter " << prefix + "qc_inv_diag"
-                << " = " << steam.qc_inv.diagonal().transpose() << std::endl;
+                   << " = " << steam.qc_inv.diagonal().transpose() << std::endl;
 
       ROS2_PARAM_CLAUSE(node, steam, prefix, num_extra_states, int);
       ROS2_PARAM_CLAUSE(node, steam, prefix, add_prev_state, bool);
@@ -420,7 +420,24 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
         steam.vp_cov.diagonal() << vp_cov_diag[0], vp_cov_diag[1], vp_cov_diag[2], vp_cov_diag[3], vp_cov_diag[4],
             vp_cov_diag[5];
       LOG(WARNING) << "Parameter " << prefix + "vp_cov_diag"
-                << " = " << steam.vp_cov.diagonal().transpose() << std::endl;
+                   << " = " << steam.vp_cov.diagonal().transpose() << std::endl;
+
+      std::string p2p_loss_func;
+      ROS2_PARAM(node, p2p_loss_func, prefix, p2p_loss_func, std::string);
+      if (p2p_loss_func == "L2")
+        ct_icp_options.p2p_loss_func = STEAM_LOSS_FUNC::L2;
+      else if (p2p_loss_func == "DCS")
+        ct_icp_options.p2p_loss_func = STEAM_LOSS_FUNC::DCS;
+      else if (p2p_loss_func == "CAUCHY")
+        ct_icp_options.p2p_loss_func = STEAM_LOSS_FUNC::CAUCHY;
+      else if (p2p_loss_func == "GM")
+        ct_icp_options.p2p_loss_func = STEAM_LOSS_FUNC::GM;
+      else {
+        LOG(WARNING) << "Parameter " << prefix + "p2p_loss_func"
+                     << " not specified. Using default value: "
+                     << "L2";
+      }
+      ROS2_PARAM_CLAUSE(node, steam, prefix, p2p_loss_sigma, double);
 
       ROS2_PARAM_CLAUSE(node, steam, prefix, use_rv, bool);
       ROS2_PARAM_CLAUSE(node, steam, prefix, merge_p2p_rv, bool);
@@ -694,13 +711,13 @@ int main(int argc, char **argv) {
       }
     }
     LOG(WARNING) << "KITTI metric translation/rotation : " << (all_seq_rpe_t / num_total_errors) * 100 << " "
-              << (all_seq_rpe_r / num_total_errors) * 180.0 / M_PI << std::endl;
+                 << (all_seq_rpe_r / num_total_errors) * 180.0 / M_PI << std::endl;
     LOG(WARNING) << "Average RPE on seq : " << average_rpe_on_seq / nb_seq_with_gt;
   }
 
   LOG(WARNING) << std::endl;
   LOG(WARNING) << "Average registration time for all sequences (ms) : "
-            << all_seq_registration_elapsed_ms / all_seq_num_frames << std::endl;
+               << all_seq_registration_elapsed_ms / all_seq_num_frames << std::endl;
 
   // rclcpp::spin(node);
   rclcpp::shutdown();

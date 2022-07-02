@@ -51,7 +51,7 @@
         min_number_neighbors: 20 # The minimum number of neighbor points to define a valid neighborhood
         voxel_neighborhood: 1
         max_number_neighbors: 20
-        max_dist_to_plane_ct_icp: 0.3
+        max_dist_to_plane_ct_icp: 1.0
         point_to_plane_with_distortion: true
         distance: CT_POINT_TO_PLANE # Options: [CT_POINT_TO_PLANE, POINT_TO_PLANE]
         num_closest_neighbors: 1
@@ -70,15 +70,19 @@
         steam:
           T_sr_vec: [-0.835, -0.39, 0.103, 0.0, 0.0, 0.0] # davids result without side slip
 
-          qc_inv_diag: [0.05, 0.05, 0.05, 0.05, 0.05, 0.05]
+          qc_inv_diag: [0.01, 0.01, 5.0, 5.0, 5.0, 0.01]
           num_extra_states: 0
           add_prev_state: true
+          num_extra_prev_states: 0
           lock_prev_pose: false
           lock_prev_vel: false
           prev_pose_as_prior: true
           prev_vel_as_prior: true
           no_prev_state_iters: 10
           association_after_adding_prev_state: false
+
+          p2p_loss_func: GM # Options: [L2, DCS, CAUCHY, GM]
+          p2p_loss_sigma: 0.1
 
           use_vp: false
           vp_cov_diag: [1000.0, 0.001, 0.001, 1.0, 1.0, 1000.0]

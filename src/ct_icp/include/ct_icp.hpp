@@ -55,6 +55,13 @@ namespace ct_icp {
         ALL             // Combines all weighting schemes with different coefficients
     };
 
+    enum class STEAM_LOSS_FUNC {
+        L2,
+        DCS,
+        CAUCHY,
+        GM
+    };
+
     // Options for the Elastic_ICP
     struct CTICPOptions {
 
@@ -152,6 +159,9 @@ namespace ct_icp {
             // velocity prior (no side slipping)
             bool use_vp = false;
             Eigen::Matrix<double, 6, 6> vp_cov = Eigen::Matrix<double, 6, 6>::Identity();
+            // p2p
+            STEAM_LOSS_FUNC p2p_loss_func = STEAM_LOSS_FUNC::L2;
+            double p2p_loss_sigma = 1.0;
             // radial velocity
             bool use_rv = false;
             bool merge_p2p_rv = false;
