@@ -107,12 +107,13 @@ namespace ct_icp {
     /// HARD CODED VALUES FOR BOREAS
 
     const char *BOREAS_SEQUENCE_NAMES[] = {
-            "boreas-2022-05-13-09-23",  // highway 7 sequence 1
-            "boreas-2022-05-13-10-30",  // north dufferin sequence 2
-            "boreas-2022-05-13-11-47",  // glen shield sequence 1
+            "boreas-2022-05-13-09-23",  // highway 7
+            "boreas-2022-05-13-10-30",  // marc santi
+            "boreas-2022-05-13-11-47",  // glen shields
+            "boreas-2022-05-18-17-23",  // cocksfield
     };
 
-    const int NUMBER_SEQUENCES_BOREAS = 3;
+    const int NUMBER_SEQUENCES_BOREAS = 4;
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
