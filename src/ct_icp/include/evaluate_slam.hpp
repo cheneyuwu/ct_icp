@@ -33,6 +33,7 @@ namespace ct_icp {
     struct seq_errors {
         std::vector<errors> tab_errors;
         double mean_rpe;
+        double mean_rpe_2d;
         double mean_ape;
         double max_ape;
         double mean_local_err;
@@ -45,6 +46,10 @@ namespace ct_icp {
 
     inline double translationError(const Eigen::Matrix4d &pose_error) {
         return pose_error.block<3, 1>(0, 3).norm();
+    }
+
+    inline double translationError2D(const Eigen::Matrix4d &pose_error) {
+        return pose_error.block<2, 1>(0, 3).norm();
     }
 
     inline double rotationError(Eigen::Matrix4d &pose_error) {
@@ -69,8 +74,8 @@ namespace ct_icp {
         return -1;
     }
 
-    double computeMeanRPE(const ArrayPoses &poses_gt, const ArrayPoses &poses_result,
-                          seq_errors &seq_err);
+    void computeMeanRPE(const ArrayPoses &poses_gt, const ArrayPoses &poses_result,
+                        seq_errors &seq_err);
 
 
     seq_errors eval(const ArrayPoses &poses_gt, const ArrayPoses &poses_estimated);

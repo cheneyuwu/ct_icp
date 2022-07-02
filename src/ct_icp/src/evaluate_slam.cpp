@@ -3,7 +3,7 @@
 namespace ct_icp {
 
     /* -------------------------------------------------------------------------------------------------------------- */
-    double computeMeanRPE(const ArrayPoses &poses_gt, const ArrayPoses &poses_result, seq_errors &seq_err) {
+    void computeMeanRPE(const ArrayPoses &poses_gt, const ArrayPoses &poses_result, seq_errors &seq_err) {
         // static parameter
         double lengths[] = {100, 200, 300, 400, 500, 600, 700, 800};
         size_t num_lengths = sizeof(lengths) / sizeof(double);
@@ -16,6 +16,7 @@ namespace ct_icp {
 
         int num_total = 0;
         double mean_rpe = 0;
+        double mean_rpe_2d = 0;
         // for all start positions do
         for (int first_frame = 0; first_frame < poses_gt.size(); first_frame += step_size) {
 
@@ -37,14 +38,18 @@ namespace ct_icp {
                 Eigen::Matrix4d pose_delta_result = poses_result[first_frame].inverse() * poses_result[last_frame];
                 Eigen::Matrix4d pose_error = pose_delta_result.inverse() * pose_delta_gt;
                 double t_err = translationError(pose_error);
+                double t_err_2d = translationError2D(pose_error);
                 double r_err = rotationError(pose_error);
                 seq_err.tab_errors.push_back(errors(t_err / len, r_err / len));
 
                 mean_rpe += t_err / len;
+                mean_rpe_2d += t_err_2d / len;
                 num_total++;
             }
         }
-        return ((mean_rpe / static_cast<double>(num_total)) * 100.0);
+
+        seq_err.mean_rpe = ((mean_rpe / static_cast<double>(num_total)) * 100.0);
+        seq_err.mean_rpe_2d = ((mean_rpe_2d / static_cast<double>(num_total)) * 100.0);
     }
 
     /* -------------------------------------------------------------------------------------------------------------- */
@@ -88,7 +93,7 @@ namespace ct_icp {
         seq_err.mean_local_err /= static_cast<double>(poses_gt.size() - 1);
 
         // Compute sequence mean RPE errors
-        seq_err.mean_rpe = computeMeanRPE(poses_gt, poses_estimated, seq_err);
+        computeMeanRPE(poses_gt, poses_estimated, seq_err);
         return seq_err;
     }
 #if false

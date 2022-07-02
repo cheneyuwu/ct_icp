@@ -660,6 +660,7 @@ int main(int argc, char **argv) {
       }
       LOG(WARNING) << "Average Number of Attempts : " << avg_number_of_attempts << std::endl;
       LOG(WARNING) << "Mean RPE : " << seq_error.mean_rpe << std::endl;
+      LOG(WARNING) << "Mean RPE 2D : " << seq_error.mean_rpe_2d << std::endl;
       LOG(WARNING) << "Mean APE : " << seq_error.mean_ape << std::endl;
       LOG(WARNING) << "Max APE : " << seq_error.max_ape << std::endl;
       LOG(WARNING) << "Mean Local Error : " << seq_error.mean_local_err << std::endl;
