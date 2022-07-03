@@ -1154,9 +1154,8 @@ namespace ct_icp {
                     Eigen::Matrix<double, 6, 6> knot_w_mr_inr_cov = trajectory[frame].end_w_mr_inr_cov;
 #endif
                     if (knot_time < (begin_time - 0.001)) {
-                        LOG(INFO) << "[CT_ICP_STEAM] Adding previous state to trajectory:"
-                                << " delta t=" << std::setprecision(8) << std::fixed
-                                << (begin_time - knot_time).seconds() << std::endl;
+                        LOG(INFO) << "[CT_ICP_STEAM] Adding previous state to trajectory with dt=" << std::setprecision(8) << std::fixed
+                                  << (begin_time - knot_time).seconds() << std::endl;
                         auto knot_T_rm_var = SE3StateVar::MakeShared(knot_T_rm);
                         auto knot_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(knot_w_mr_inr);
                         steam_trajectory->add(knot_time, knot_T_rm_var, knot_w_mr_inr_var);
@@ -1179,14 +1178,17 @@ namespace ct_icp {
                             prior_cost_terms.emplace_back(WeightedLeastSqCostTerm<6>::MakeShared(error_func, noise_model, loss_func));
                         }
                     } else if (knot_time <= begin_time) {
-                        LOG(INFO) << "[CT_ICP_STEAM] The end of last scan == beginning of current scan!" << std::endl;
+                        LOG(INFO) << "[CT_ICP_STEAM] The end of last scan == beginning of current scan with dt=" << std::setprecision(8) << std::fixed
+                                  << (begin_time - knot_time).seconds() << std::endl;
                         if (options.steam.lock_prev_pose) begin_T_rm_var->locked() = true;
                         if (options.steam.lock_prev_vel) begin_w_mr_inr_var->locked() = true;
                         if (options.steam.prev_pose_as_prior) steam_trajectory->addPosePrior(begin_time, knot_T_rm, knot_T_rm_cov);
                         if (options.steam.prev_vel_as_prior) steam_trajectory->addVelocityPrior(begin_time, knot_w_mr_inr, knot_w_mr_inr_cov);
                     } else {
-                        LOG(ERROR) << "[CT_ICP_STEAM] The end of last scan > beginning of current scan - not possible!" << std::endl;
-                        throw std::runtime_error("[CT_ICP_STEAM] The end of last scan > beginning of current scan - not possible!");
+                        LOG(ERROR) << "[CT_ICP_STEAM] The end of last scan > beginning of current scan with frame="
+                                << index_frame << ", dt="
+                                << std::setprecision(8) << std::fixed << (begin_time - knot_time).seconds() << std::endl;
+                        // throw std::runtime_error("[CT_ICP_STEAM] The end of last scan > beginning of current scan - not possible!");
                     }
                 }
                 ready_to_add_prev_state = 2;
