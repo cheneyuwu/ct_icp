@@ -1252,7 +1252,10 @@ namespace ct_icp {
 
                 if (innerloop_time) inner_timer[2].second->start();
 
-                bool use_p2p = (fabs(dist_to_plane) < options.max_dist_to_plane_ct_icp);
+                double max_dist_to_plane = (iter >= options.steam.p2p_initial_iters
+                                                    ? options.steam.p2p_refined_max_dist
+                                                    : options.steam.p2p_initial_max_dist);
+                bool use_p2p = (fabs(dist_to_plane) < max_dist_to_plane);
                 if (use_p2p) {
                     /// \note query and reference point
                     ///   const auto qry_pt = keypoint.raw_pt;
@@ -1428,9 +1431,10 @@ namespace ct_icp {
             summary.success = true;
             summary.num_residuals_used = number_keypoints_used;
 
-            if ((index_frame > 1) &&
-                (diff_rot < options.threshold_orientation_norm &&
-                 diff_trans < options.threshold_translation_norm)) {
+            if ((index_frame > 1)
+                && iter >= options.steam.p2p_initial_iters
+                && (diff_rot < options.threshold_orientation_norm &&
+                    diff_trans < options.threshold_translation_norm)) {
 
                 if (options.debug_print) {
                     LOG(INFO) << "CT_ICP: Finished with N=" << iter << " ICP iterations" << std::endl;

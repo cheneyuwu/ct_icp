@@ -422,6 +422,9 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       LOG(WARNING) << "Parameter " << prefix + "vp_cov_diag"
                    << " = " << steam.vp_cov.diagonal().transpose() << std::endl;
 
+      ROS2_PARAM_CLAUSE(node, steam, prefix, p2p_initial_iters, int);
+      ROS2_PARAM_CLAUSE(node, steam, prefix, p2p_initial_max_dist, double);
+      ROS2_PARAM_CLAUSE(node, steam, prefix, p2p_refined_max_dist, double);
       std::string p2p_loss_func;
       ROS2_PARAM(node, p2p_loss_func, prefix, p2p_loss_func, std::string);
       if (p2p_loss_func == "L2")

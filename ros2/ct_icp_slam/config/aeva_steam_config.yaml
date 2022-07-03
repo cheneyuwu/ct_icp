@@ -51,7 +51,7 @@
         min_number_neighbors: 20 # The minimum number of neighbor points to define a valid neighborhood
         voxel_neighborhood: 1
         max_number_neighbors: 20
-        max_dist_to_plane_ct_icp: 1.0
+        max_dist_to_plane_ct_icp: 0.3
         point_to_plane_with_distortion: true
         distance: CT_POINT_TO_PLANE # Options: [CT_POINT_TO_PLANE, POINT_TO_PLANE]
         num_closest_neighbors: 1
@@ -81,6 +81,9 @@
           no_prev_state_iters: 10
           association_after_adding_prev_state: false
 
+          p2p_initial_iters: 0
+          p2p_initial_max_dist: 1.0
+          p2p_refined_max_dist: 1.0
           p2p_loss_func: GM # Options: [L2, DCS, CAUCHY, GM]
           p2p_loss_sigma: 0.1
 
@@ -93,5 +96,5 @@
           rv_loss_threshold: 0.1
 
           verbose: false
-          max_iterations: 1
+          max_iterations: 5
           num_threads: 10

@@ -160,6 +160,9 @@ namespace ct_icp {
             bool use_vp = false;
             Eigen::Matrix<double, 6, 6> vp_cov = Eigen::Matrix<double, 6, 6>::Identity();
             // p2p
+            int p2p_initial_iters = 0;
+            double p2p_initial_max_dist = 0.3;
+            double p2p_refined_max_dist = 0.3;
             STEAM_LOSS_FUNC p2p_loss_func = STEAM_LOSS_FUNC::L2;
             double p2p_loss_sigma = 1.0;
             // radial velocity
