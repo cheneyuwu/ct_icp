@@ -70,7 +70,7 @@
         steam:
           T_sr_vec: [-0.835, -0.39, 0.103, 0.0, 0.0, 0.0] # davids result without side slip
 
-          qc_inv_diag: [0.01, 0.01, 5.0, 5.0, 5.0, 0.01]
+          qc_inv_diag: [0.01, 0.01, 1.0, 1.0, 1.0, 0.01]
           num_extra_states: 0
           add_prev_state: true
           num_extra_prev_states: 0
