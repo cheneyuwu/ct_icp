@@ -58,7 +58,7 @@
         beta_location_consistency: 0.001
         beta_constant_velocity: 0.001
 
-        solver: CERES # Options: [GN=Gauss-Newton, CERES, STEAM]
+        solver: STEAM # Options: [GN=Gauss-Newton, CERES, STEAM]
         loss_function: CAUCHY # Options: [STANDARD, CAUCHY, HUBER, TOLERANT, TRUNCATED] (for CERES solver)
         ls_max_num_iters: 5 # The number of steps performed for each iteration of the ICP (for CERES solver)
         ls_num_threads: 10 # The number of threads to build and solve the least square system (for CERES solver)
