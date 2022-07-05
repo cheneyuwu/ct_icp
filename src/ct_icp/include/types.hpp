@@ -59,6 +59,7 @@ namespace ct_icp {
         Eigen::Matrix<double, 6, 6> begin_w_mr_inr_cov = Eigen::Matrix<double, 6, 6>::Identity();
         Eigen::Matrix<double, 6, 6> end_T_rm_cov = Eigen::Matrix<double, 6, 6>::Identity();
         Eigen::Matrix<double, 6, 6> end_w_mr_inr_cov = Eigen::Matrix<double, 6, 6>::Identity();
+        Eigen::Matrix<double, 12, 12> end_state_cov = Eigen::Matrix<double, 12, 12>::Identity();
 
         inline double EgoAngularDistance() const {
             return AngularDistance(begin_R, end_R);
