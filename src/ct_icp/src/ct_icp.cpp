@@ -1185,10 +1185,20 @@ namespace ct_icp {
                         if (options.steam.prev_pose_as_prior) steam_trajectory->addPosePrior(begin_time, knot_T_rm, knot_T_rm_cov);
                         if (options.steam.prev_vel_as_prior) steam_trajectory->addVelocityPrior(begin_time, knot_w_mr_inr, knot_w_mr_inr_cov);
                     } else {
-                        LOG(ERROR) << "[CT_ICP_STEAM] The end of last scan > beginning of current scan with frame="
-                                << index_frame << ", dt="
-                                << std::setprecision(8) << std::fixed << (begin_time - knot_time).seconds() << std::endl;
-                        // throw std::runtime_error("[CT_ICP_STEAM] The end of last scan > beginning of current scan - not possible!");
+                        LOG(WARNING) << "[CT_ICP_STEAM] The end of last scan > beginning of current scan with frame="
+                                     << index_frame << ", dt="
+                                     << std::setprecision(8) << std::fixed << (begin_time - knot_time).seconds() << std::endl;
+                        if ((knot_time - begin_time).seconds() < 0.001) {
+                            if (options.steam.lock_prev_pose) begin_T_rm_var->locked() = true;
+                            if (options.steam.lock_prev_vel) begin_w_mr_inr_var->locked() = true;
+                            if (options.steam.prev_pose_as_prior) steam_trajectory->addPosePrior(begin_time, knot_T_rm, knot_T_rm_cov);
+                            if (options.steam.prev_vel_as_prior) steam_trajectory->addVelocityPrior(begin_time, knot_w_mr_inr, knot_w_mr_inr_cov);
+                        } else {
+                            LOG(ERROR) << "[CT_ICP_STEAM] The end of last scan > beginning of current scan with frame="
+                                       << index_frame << ", dt="
+                                       << std::setprecision(8) << std::fixed << (begin_time - knot_time).seconds() << std::endl;
+                            // throw std::runtime_error("[CT_ICP_STEAM] The end of last scan > beginning of current scan - not possible!");
+                        }
                     }
                 }
                 ready_to_add_prev_state = 2;
