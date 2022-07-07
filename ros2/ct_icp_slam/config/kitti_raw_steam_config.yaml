@@ -41,6 +41,7 @@
       robust_registration: false
       motion_compensation: CONTINUOUS # The profile of the motion compensation (NONE, CONSTANT_VELOCITY, ITERATIVE, CONTINUOUS)
       initialization: INIT_CONSTANT_VELOCITY
+      delay_adding_points: true
       debug_print: true
 
       # CT_ICP OPTIONS ----
