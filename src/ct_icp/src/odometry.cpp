@@ -586,6 +586,138 @@ namespace ct_icp {
         return summary;
     }
 
+    Odometry::RegistrationSummary Odometry::RegisterFrameSteam(const std::vector<Point3D> &const_frame) {
+        /// \todo use STEAM to initialize motion
+        int index_frame = InitializeMotion();
+
+        auto start = std::chrono::steady_clock::now();
+        auto &log_out = *log_out_;
+        bool kDisplay = options_.debug_print;
+        CTICPOptions ct_icp_options = options_.ct_icp_options; // Make a copy of the options
+
+        const double kSizeVoxelMap = options_.ct_icp_options.size_voxel_map;
+        const double kMinDistancePoints = options_.min_distance_points;
+        const int kMaxNumPointsInVoxel = options_.max_num_points_in_voxel;
+
+        if (kDisplay) {
+            log_out << "/* ------------------------------------------------------------------------ */" << std::endl;
+            log_out << "/* ------------------------------------------------------------------------ */" << std::endl;
+            std::string solver;
+            switch (options_.ct_icp_options.solver) {
+                case CERES:
+                    solver = "CERES";
+                    break;
+                case GN:
+                    solver = "GN";
+                    break;
+                case STEAM:
+                    solver = "STEAM";
+                    break;
+            }
+            log_out << "REGISTRATION OF FRAME number " << index_frame << " with " << solver << " solver" << std::endl;
+        }
+
+        auto frame = InitializeFrame(const_frame, index_frame);
+        if (kDisplay)
+            log_out << "Number of points in sub-sampled frame: " << frame.size() << " / " << const_frame.size()
+                    << std::endl;
+        if (index_frame > 0) {
+            Eigen::Vector3d t_diff = trajectory_[index_frame].end_t - trajectory_[index_frame].begin_t;
+            if (kDisplay)
+                log_out << "Initial ego-motion distance: " << t_diff.norm() << std::endl;
+        }
+
+        const auto initial_estimate = trajectory_.back();
+        RegistrationSummary summary;
+        summary.frame = initial_estimate;
+        auto previous_frame = initial_estimate;
+
+
+        if (index_frame > 0) {
+            summary.number_of_attempts = 1;
+            double sample_voxel_size = index_frame < options_.init_num_frames ?
+                                       options_.init_sample_voxel_size : options_.sample_voxel_size;
+
+            auto start_ct_icp = std::chrono::steady_clock::now();
+            TryRegister(frame, index_frame, ct_icp_options, summary, sample_voxel_size);
+            auto end_ct_icp = std::chrono::steady_clock::now();
+            std::chrono::duration<double> elapsed_icp = (end_ct_icp - start);
+            if (kDisplay) {
+                log_out << "Elapsed Elastic_ICP: " << (elapsed_icp.count()) * 1000.0 << std::endl;
+                log_out << "Number of Keypoints extracted: " << summary.sample_size <<
+                        " / Actual number of residuals: " << summary.number_of_residuals << std::endl;
+            }
+
+            // Compute Modification of trajectory
+            if (index_frame > 0) {
+                summary.distance_correction = (trajectory_[index_frame].begin_t -
+                                                trajectory_[index_frame - 1].end_t).norm();
+                summary.relative_orientation = AngularDistance(trajectory_[index_frame - 1].end_R,
+                                                                trajectory_[index_frame].end_R);
+                summary.ego_orientation = summary.frame.EgoAngularDistance();
+
+            }
+            summary.relative_distance = (trajectory_[index_frame].end_t - trajectory_[index_frame].begin_t).norm();
+
+            trajectory_[index_frame].success = summary.success;
+
+            if (!summary.success) {
+                if (kDisplay)
+                    log_out << "Failure to register, after " << summary.number_of_attempts << std::endl;
+                return summary;
+            }
+        }
+
+        if (kDisplay) {
+            if (index_frame > 0) {
+                log_out << "Trajectory correction [begin(t) - end(t-1)]: "
+                        << summary.distance_correction << std::endl;
+                log_out << "Final ego-motion distance: " << summary.relative_distance << std::endl;
+            }
+        }
+
+        bool add_points = true;
+
+        if (add_points) {
+            //Update Voxel Map+
+            AddPointsToMap(voxel_map_, frame, kSizeVoxelMap,
+                           kMaxNumPointsInVoxel, kMinDistancePoints);
+        }
+
+        // Remove voxels too far from actual position of the vehicule
+        const double kMaxDistance = options_.max_distance;
+        const Eigen::Vector3d location = trajectory_[index_frame].end_t;
+        RemovePointsFarFromLocation(voxel_map_, location, kMaxDistance);
+
+
+        if (kDisplay) {
+            log_out << "Average Load Factor (Map): " << voxel_map_.load_factor() << std::endl;
+            log_out << "Number of Buckets (Map): " << voxel_map_.bucket_count() << std::endl;
+            log_out << "Number of points (Map): " << MapSize() << std::endl;
+        }
+
+        auto end = std::chrono::steady_clock::now();
+        std::chrono::duration<double> elapsed_seconds = end - start;
+        if (kDisplay) {
+            log_out << "Elapsed Time: " << elapsed_seconds.count() * 1000.0 << " (ms)" << std::endl;
+        }
+
+        summary.corrected_points = frame;
+        summary.all_corrected_points = const_frame;
+
+        Eigen::Quaterniond q_begin(summary.frame.begin_R);
+        Eigen::Quaterniond q_end(summary.frame.end_R);
+
+        for (auto &point3D: summary.all_corrected_points) {
+            double timestamp = point3D.alpha_timestamp;
+            Eigen::Quaterniond slerp = q_begin.slerp(timestamp, q_end).normalized();
+            point3D.pt = slerp.toRotationMatrix() * point3D.raw_pt +
+                         summary.frame.begin_t * (1.0 - timestamp) + timestamp * summary.frame.end_t;
+        }
+
+        return summary;
+    }
+
 
     /* -------------------------------------------------------------------------------------------------------------- */
     Odometry::RegistrationSummary Odometry::TryRegister(vector<Point3D> &frame, int index_frame,

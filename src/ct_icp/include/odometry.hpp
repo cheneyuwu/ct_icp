@@ -151,6 +151,7 @@ namespace ct_icp {
 
         // Registers a new Frame to the Map
         RegistrationSummary RegisterFrame(const std::vector<Point3D> &frame);
+        RegistrationSummary RegisterFrameSteam(const std::vector<Point3D> &frame);
 
         // Registers a new Frame to the Map with an initial estimate
         RegistrationSummary RegisterFrameWithEstimate(const std::vector<Point3D> &frame,

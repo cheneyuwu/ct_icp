@@ -577,7 +577,7 @@ int main(int argc, char **argv) {
 
       auto time_read_pointcloud = std::chrono::steady_clock::now();
 
-      auto summary = ct_icp_odometry.RegisterFrame(frame);
+      auto summary = ct_icp_odometry.RegisterFrameSteam(frame);
       avg_number_of_attempts += summary.number_of_attempts;
       auto time_register_frame = std::chrono::steady_clock::now();
 
