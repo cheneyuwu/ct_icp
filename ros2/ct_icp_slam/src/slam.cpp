@@ -261,6 +261,8 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
                    << "INIT_CONSTANT_VELOCITY";
     }
 
+    ROS2_PARAM_CLAUSE(node, odometry_options, prefix, delay_adding_points, bool);
+
     ROS2_PARAM_CLAUSE(node, odometry_options, prefix, debug_print, bool);
     ROS2_PARAM_CLAUSE(node, odometry_options, prefix, debug_viz, bool);
     ROS2_PARAM_CLAUSE(node, odometry_options, prefix, log_to_file, bool);

@@ -630,8 +630,6 @@ namespace ct_icp {
         const auto initial_estimate = trajectory_.back();
         RegistrationSummary summary;
         summary.frame = initial_estimate;
-        auto previous_frame = initial_estimate;
-
 
         if (index_frame > 0) {
             summary.number_of_attempts = 1;
@@ -676,12 +674,28 @@ namespace ct_icp {
             }
         }
 
-        bool add_points = true;
-
-        if (add_points) {
+        if (index_frame == 0 || (!options_.delay_adding_points)) {
             //Update Voxel Map+
             AddPointsToMap(voxel_map_, frame, kSizeVoxelMap,
-                           kMaxNumPointsInVoxel, kMinDistancePoints);
+                            kMaxNumPointsInVoxel, kMinDistancePoints);
+        } else {
+            //Update Voxel Map+
+            trajectory_[index_frame].points = frame;
+            if (index_frame > 1) {
+                //Update frame
+                auto q_begin = Eigen::Quaterniond(trajectory_[index_frame-1].begin_R);
+                auto q_end = Eigen::Quaterniond(trajectory_[index_frame-1].end_R);
+                Eigen::Vector3d t_begin = trajectory_[index_frame-1].begin_t;
+                Eigen::Vector3d t_end = trajectory_[index_frame-1].end_t;
+                auto &prev_frame = trajectory_[index_frame-1].points;
+                for (auto &point: prev_frame) {
+                    // Modifies the world point of the frame based on the raw_pt
+                    TransformPoint(options_.motion_compensation, point, q_begin, q_end, t_begin, t_end);
+                }
+                AddPointsToMap(voxel_map_, prev_frame, kSizeVoxelMap,
+                                kMaxNumPointsInVoxel, kMinDistancePoints);
+                prev_frame.clear();
+            }
         }
 
         // Remove voxels too far from actual position of the vehicule
@@ -744,12 +758,12 @@ namespace ct_icp {
             }
             registration_summary.success = icp_summary.success;
             registration_summary.number_of_residuals = icp_summary.num_residuals_used;
-
+#if false
             if (!registration_summary.success) {
                 registration_summary.success = false;
                 return registration_summary;
             }
-
+#endif
             //Update frame
             auto q_begin = Eigen::Quaterniond(trajectory_[index_frame].begin_R);
             auto q_end = Eigen::Quaterniond(trajectory_[index_frame].end_R);

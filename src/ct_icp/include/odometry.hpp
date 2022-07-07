@@ -62,6 +62,7 @@ namespace ct_icp {
 
         INITIALIZATION initialization = INIT_CONSTANT_VELOCITY;
 
+        bool delay_adding_points = false; // Whether to delay adding points to the map until the next iteration
 
         // Debug Parameters
         bool debug_print = true; // Whether to print debug information into the console
