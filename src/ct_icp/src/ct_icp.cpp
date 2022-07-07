@@ -882,7 +882,8 @@ namespace ct_icp {
                     std::cout << summary.error_log;
 
                 summary.success = false;
-                return summary;
+
+                break; // return summary;
             }
 
             timer[1].second->start();
@@ -959,6 +960,7 @@ namespace ct_icp {
 
             timer[2].second->start();
 
+            //Update (changes trajectory data)
             trajectory[index_frame].begin_R = rotation_begin * trajectory[index_frame].begin_R;
             trajectory[index_frame].begin_t = trajectory[index_frame].begin_t + translation_begin;
             trajectory[index_frame].end_R = rotation_end * trajectory[index_frame].end_R;
@@ -985,25 +987,30 @@ namespace ct_icp {
 
             timer[3].second->stop();
 
-            if ((index_frame > 1) && (x_bundle.norm() < options.threshold_orientation_norm)) {
-                summary.success = true;
-                summary.num_residuals_used = number_keypoints_used;
+            summary.success = true;
+            summary.num_residuals_used = number_keypoints_used;
 
-                return summary;
+            if ((index_frame > 1)
+                && (x_bundle.norm() < options.threshold_orientation_norm)) {
+
+                if (options.debug_print) {
+                    LOG(INFO) << "CT_ICP: Finished with N=" << iter << " ICP iterations" << std::endl;
+                }
+
+                break; // return summary;
             }
         }
 
+
         if (options.debug_print) {
             for (size_t i = 0; i < timer.size(); i++)
-                std::cout << "Elapsed " << timer[i].first << *(timer[i].second) << std::endl;
+                LOG(INFO) << "Elapsed " << timer[i].first << *(timer[i].second) << std::endl;
             for (size_t i = 0; i < inner_timer.size(); i++)
-                std::cout << "Elapsed (Inner Loop) " << inner_timer[i].first << *(inner_timer[i].second) << std::endl;
-            std::cout << "Number iterations CT-ICP : " << options.num_iters_icp << std::endl;
-            std::cout << "Translation Begin: " << trajectory[index_frame].begin_t.transpose() << std::endl;
-            std::cout << "Translation End: " << trajectory[index_frame].end_t.transpose() << std::endl;
+                LOG(INFO) << "Elapsed (Inner Loop) " << inner_timer[i].first << *(inner_timer[i].second) << std::endl;
+            LOG(INFO) << "Number iterations CT-ICP : " << options.num_iters_icp << std::endl;
+            LOG(INFO) << "Translation Begin: " << trajectory[index_frame].begin_t.transpose() << std::endl;
+            LOG(INFO) << "Translation End: " << trajectory[index_frame].end_t.transpose() << std::endl;
         }
-        summary.success = true;
-        summary.num_residuals_used = number_keypoints_used;
 
         return summary;
     }
