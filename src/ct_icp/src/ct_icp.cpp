@@ -1025,46 +1025,46 @@ namespace ct_icp {
         const auto steam_trajectory = const_vel::Interface::MakeShared(options.steam.qc_inv, true);
         std::vector<StateVarBase::Ptr> steam_state_vars;
         std::vector<BaseCostTerm::ConstPtr> prior_cost_terms;
-        StateVarBase::Ptr begin_T_rm_var = nullptr;
-        StateVarBase::Ptr begin_w_mr_inr_var = nullptr;
+        StateVarBase::Ptr prev_T_rm_var = nullptr;
+        StateVarBase::Ptr prev_w_mr_inr_var = nullptr;
 
         /// use previous trajectory to initialize steam state variables
-        LOG(INFO) << "[CT_ICP_STEAM] prev_timestamp: " << trajectory[index_frame - 1].end_timestamp << std::endl;
-        Time prev_time(static_cast<double>(trajectory[index_frame - 1].end_timestamp));
+        LOG(INFO) << "[CT_ICP_STEAM] prev scan end time: " << trajectory[index_frame - 1].end_timestamp << std::endl;
+        const double prev_time = trajectory[index_frame - 1].end_timestamp;
+        Time prev_steam_time(static_cast<double>(prev_time));
         lgmath::se3::Transformation prev_T_rm;
         Eigen::Matrix<double, 6, 1> prev_w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
-#if false
-        Eigen::Matrix<double, 6, 6> prev_T_rm_cov = Eigen::Matrix<double, 6, 6>::Identity();
-        Eigen::Matrix<double, 6, 6> prev_w_mr_inr_cov = Eigen::Matrix<double, 6, 6>::Identity();
-#endif
         auto prev_steam_trajectory = trajectory[index_frame - 1].steam_traj;
         if (prev_steam_trajectory != nullptr) {
-            prev_T_rm = prev_steam_trajectory->getPoseInterpolator(prev_time)->evaluate();
-            prev_w_mr_inr = prev_steam_trajectory->getVelocityInterpolator(prev_time)->evaluate();
-#if false
-            prev_T_rm_cov = trajectory[index_frame - 1].end_T_rm_cov;
-            prev_w_mr_inr_cov = trajectory[index_frame - 1].end_w_mr_inr_cov;
-#endif
+            prev_T_rm = prev_steam_trajectory->getPoseInterpolator(prev_steam_time)->evaluate();
+            prev_w_mr_inr = prev_steam_trajectory->getVelocityInterpolator(prev_steam_time)->evaluate();
         }
 
         /// New state for this frame
-        LOG(INFO) << "[CT_ICP_STEAM] begin_timestamp: " << trajectory[index_frame].begin_timestamp << std::endl;
-        LOG(INFO) << "[CT_ICP_STEAM] end_timestamp: " << trajectory[index_frame].end_timestamp << std::endl;
-        LOG(INFO) << "[CT_ICP_STEAM] total num states: " << (options.steam.num_extra_states + 2) << std::endl;
-        const double begin_timestamp = trajectory[index_frame].begin_timestamp;
-        const double end_timestamp = trajectory[index_frame].end_timestamp;
+        LOG(INFO) << "[CT_ICP_STEAM] curr scan end time: " << trajectory[index_frame].end_timestamp << std::endl;
+        LOG(INFO) << "[CT_ICP_STEAM] total num new states: " << (options.steam.num_extra_states + 2) << std::endl;
+        const double curr_time = trajectory[index_frame].end_timestamp;
         const int num_states = options.steam.num_extra_states + 2;
-        const double time_diff = (end_timestamp - begin_timestamp) / (static_cast<double>(num_states) - 1.0);
-        for (int i = 0; i < num_states; ++i) {
-            Time knot_time(static_cast<double>(begin_timestamp + i * time_diff));
+        const double time_diff = (curr_time - prev_time) / (static_cast<double>(num_states) - 1.0);
+        std::vector<double> knot_times;
+        knot_times.reserve(num_states);
+        knot_times.emplace_back(prev_time);
+        for (int i = 0; i < options.steam.num_extra_states; ++i) {
+          knot_times.emplace_back(prev_time + (double)(i + 1) * time_diff);
+        }
+        knot_times.emplace_back(curr_time);
+
+        for (size_t i = 0; i < knot_times.size(); ++i) {
+            double knot_time = knot_times[i];
+            Time knot_steam_time(knot_time);
             //
-            const Eigen::Matrix<double,6,1> xi_mr_inr_odo((knot_time - prev_time).seconds() * prev_w_mr_inr);
+            const Eigen::Matrix<double,6,1> xi_mr_inr_odo((knot_steam_time - prev_steam_time).seconds() * prev_w_mr_inr);
             const auto knot_T_rm = lgmath::se3::Transformation(xi_mr_inr_odo) * prev_T_rm;
             const auto T_rm_var = SE3StateVar::MakeShared(knot_T_rm);
             //
             const auto w_mr_inr_var = VSpaceStateVar<6>::MakeShared(prev_w_mr_inr);
             //
-            steam_trajectory->add(knot_time, T_rm_var, w_mr_inr_var);
+            steam_trajectory->add(knot_steam_time, T_rm_var, w_mr_inr_var);
             steam_state_vars.emplace_back(T_rm_var);
             steam_state_vars.emplace_back(w_mr_inr_var);
             //
@@ -1076,8 +1076,8 @@ namespace ct_icp {
             }
             // cache begin state in case it needs to be locked
             if (i == 0) {
-                begin_T_rm_var = T_rm_var;
-                begin_w_mr_inr_var = w_mr_inr_var;
+                prev_T_rm_var = T_rm_var;
+                prev_w_mr_inr_var = w_mr_inr_var;
             }
         }
 
@@ -1086,14 +1086,14 @@ namespace ct_icp {
         std::vector<Evaluable<const_vel::Interface::VelocityType>::ConstPtr> w_ms_ins_intp_eval_vec;
         T_ms_intp_eval_vec.reserve(keypoints.size());
         for (auto &keypoint: keypoints) {
-            const auto qry_time = trajectory[index_frame].begin_timestamp +
-                                  keypoint.alpha_timestamp * (trajectory[index_frame].end_timestamp - trajectory[index_frame].begin_timestamp);
+            const auto query_time = trajectory[index_frame].begin_timestamp +
+                                    keypoint.alpha_timestamp * (trajectory[index_frame].end_timestamp - trajectory[index_frame].begin_timestamp);
             // pose
-            const auto T_rm_intp_eval = steam_trajectory->getPoseInterpolator(Time(qry_time));
+            const auto T_rm_intp_eval = steam_trajectory->getPoseInterpolator(Time(query_time));
             const auto T_ms_intp_eval = inverse(compose(T_sr_var, T_rm_intp_eval));
             T_ms_intp_eval_vec.emplace_back(T_ms_intp_eval);
             // velocity
-            const auto w_mr_inr_intp_eval = steam_trajectory->getVelocityInterpolator(Time(qry_time));
+            const auto w_mr_inr_intp_eval = steam_trajectory->getVelocityInterpolator(Time(query_time));
             const auto w_ms_ins_intp_eval = compose_velocity(T_sr_var, w_mr_inr_intp_eval);
             w_ms_ins_intp_eval_vec.emplace_back(w_ms_ins_intp_eval);
         }
@@ -1132,87 +1132,33 @@ namespace ct_icp {
             if (options.steam.add_prev_state && ready_to_add_prev_state == 1) {
                 Time begin_time(static_cast<double>(trajectory[index_frame].begin_timestamp));
 
-                size_t initial_frame = std::max(0, index_frame - 1 - options.steam.num_extra_prev_states);
-                for (size_t frame = initial_frame; frame < index_frame; ++frame) {
+                Eigen::Matrix<double, 6, 6> prev_T_rm_cov = Eigen::Matrix<double, 6, 6>::Identity();
+                Eigen::Matrix<double, 6, 6> prev_w_mr_inr_cov = Eigen::Matrix<double, 6, 6>::Identity();
+                Eigen::Matrix<double, 12, 12> prev_state_cov = Eigen::Matrix<double, 12, 12>::Identity();
+                if (prev_steam_trajectory != nullptr) {
+                    prev_T_rm_cov = trajectory[index_frame - 1].end_T_rm_cov;
+                    prev_w_mr_inr_cov = trajectory[index_frame - 1].end_w_mr_inr_cov;
+                    prev_state_cov = trajectory[index_frame - 1].end_state_cov;
+                }
 
-                    Time knot_time(static_cast<double>(trajectory[frame].end_timestamp));
-                    lgmath::se3::Transformation knot_T_rm;
-                    Eigen::Matrix<double, 6, 1> knot_w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
-                    Eigen::Matrix<double, 6, 6> knot_T_rm_cov = Eigen::Matrix<double, 6, 6>::Identity();
-                    Eigen::Matrix<double, 6, 6> knot_w_mr_inr_cov = Eigen::Matrix<double, 6, 6>::Identity();
-                    Eigen::Matrix<double, 12, 12> knot_state_cov = Eigen::Matrix<double, 12, 12>::Identity();
-                    auto knot_steam_trajectory = trajectory[frame].steam_traj;
-                    if (knot_steam_trajectory != nullptr) {
-                        knot_T_rm = knot_steam_trajectory->getPoseInterpolator(knot_time)->evaluate();
-                        knot_w_mr_inr = knot_steam_trajectory->getVelocityInterpolator(knot_time)->evaluate();
-                        knot_T_rm_cov = trajectory[frame].end_T_rm_cov;
-                        knot_w_mr_inr_cov = trajectory[frame].end_w_mr_inr_cov;
-                        knot_state_cov = trajectory[frame].end_state_cov;
-                    }
-
-                    if (knot_time < (begin_time - 0.001)) {
-                        LOG(INFO) << "[CT_ICP_STEAM] Adding previous state to trajectory with dt=" << std::setprecision(8) << std::fixed
-                                  << (begin_time - knot_time).seconds() << std::endl;
-                        auto knot_T_rm_var = SE3StateVar::MakeShared(knot_T_rm);
-                        auto knot_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(knot_w_mr_inr);
-                        steam_trajectory->add(knot_time, knot_T_rm_var, knot_w_mr_inr_var);
-                        steam_state_vars.emplace_back(knot_T_rm_var);
-                        steam_state_vars.emplace_back(knot_w_mr_inr_var);
-                        if (options.steam.lock_prev_pose) knot_T_rm_var->locked() = true;
-                        if (options.steam.lock_prev_vel) knot_w_mr_inr_var->locked() = true;
-                        if (options.steam.prev_pose_as_prior && options.steam.prev_vel_as_prior) {
-                            const auto pose_error = se3::se3_error(knot_T_rm_var, knot_T_rm);
-                            const auto velo_error = vspace_error<6>(knot_w_mr_inr_var, knot_w_mr_inr);
-                            auto error_func = const_vel::merge(pose_error, velo_error);
-                            const auto noise_model = StaticNoiseModel<12>::MakeShared(knot_state_cov);
-                            const auto loss_func = std::make_shared<L2LossFunc>();
-                            prior_cost_terms.emplace_back(WeightedLeastSqCostTerm<12>::MakeShared(error_func, noise_model, loss_func));
-                        } else if (options.steam.prev_pose_as_prior) {
-                            const auto error_func = se3::se3_error(knot_T_rm_var, knot_T_rm);
-                            const auto noise_model = StaticNoiseModel<6>::MakeShared(knot_T_rm_cov);
-                            const auto loss_func = L2LossFunc::MakeShared();
-                            prior_cost_terms.emplace_back(WeightedLeastSqCostTerm<6>::MakeShared(error_func, noise_model, loss_func));
-                        } else if (options.steam.prev_vel_as_prior) {
-                            const auto error_func = vspace_error<6>(knot_w_mr_inr_var, knot_w_mr_inr);
-                            const auto noise_model = StaticNoiseModel<6>::MakeShared(knot_w_mr_inr_cov);
-                            const auto loss_func = std::make_shared<L2LossFunc>();
-                            prior_cost_terms.emplace_back(WeightedLeastSqCostTerm<6>::MakeShared(error_func, noise_model, loss_func));
-                        }
-                    } else if (knot_time <= begin_time) {
-                        LOG(INFO) << "[CT_ICP_STEAM] The end of last scan == beginning of current scan with dt=" << std::setprecision(8) << std::fixed
-                                  << (begin_time - knot_time).seconds() << std::endl;
-                        // lock
-                        if (options.steam.lock_prev_pose) begin_T_rm_var->locked() = true;
-                        if (options.steam.lock_prev_vel) begin_w_mr_inr_var->locked() = true;
-                        // prior
-                        if (options.steam.prev_pose_as_prior && options.steam.prev_vel_as_prior)
-                            steam_trajectory->addStatePrior(begin_time, knot_T_rm, knot_w_mr_inr, knot_state_cov);
-                        else if (options.steam.prev_pose_as_prior)
-                            steam_trajectory->addPosePrior(begin_time, knot_T_rm, knot_T_rm_cov);
-                        else if (options.steam.prev_vel_as_prior)
-                            steam_trajectory->addVelocityPrior(begin_time, knot_w_mr_inr, knot_w_mr_inr_cov);
-                    } else {
-                        LOG(WARNING) << "[CT_ICP_STEAM] The end of last scan > beginning of current scan with frame="
-                                     << index_frame << ", dt="
-                                     << std::setprecision(8) << std::fixed << (begin_time - knot_time).seconds() << std::endl;
-                        if ((knot_time - begin_time).seconds() < 0.001) {
-                            // lock
-                            if (options.steam.lock_prev_pose) begin_T_rm_var->locked() = true;
-                            if (options.steam.lock_prev_vel) begin_w_mr_inr_var->locked() = true;
-                            // prior
-                            if (options.steam.prev_pose_as_prior && options.steam.prev_vel_as_prior)
-                                steam_trajectory->addStatePrior(begin_time, knot_T_rm, knot_w_mr_inr, knot_state_cov);
-                            else if (options.steam.prev_pose_as_prior)
-                                steam_trajectory->addPosePrior(begin_time, knot_T_rm, knot_T_rm_cov);
-                            else if (options.steam.prev_vel_as_prior)
-                                steam_trajectory->addVelocityPrior(begin_time, knot_w_mr_inr, knot_w_mr_inr_cov);
-                        } else {
-                            LOG(ERROR) << "[CT_ICP_STEAM] The end of last scan > beginning of current scan with frame="
-                                       << index_frame << ", dt="
-                                       << std::setprecision(8) << std::fixed << (begin_time - knot_time).seconds() << std::endl;
-                            // throw std::runtime_error("[CT_ICP_STEAM] The end of last scan > beginning of current scan - not possible!");
-                        }
-                    }
+                if (prev_time < curr_time) {
+                    LOG(INFO) << "[CT_ICP_STEAM] The end of last scan < end of current scan with dt=" << std::setprecision(8) << std::fixed
+                                << (curr_time - prev_time) << std::endl;
+                    // lock
+                    if (options.steam.lock_prev_pose) prev_T_rm_var->locked() = true;
+                    if (options.steam.lock_prev_vel) prev_w_mr_inr_var->locked() = true;
+                    // prior
+                    if (options.steam.prev_pose_as_prior && options.steam.prev_vel_as_prior)
+                        steam_trajectory->addStatePrior(prev_steam_time, prev_T_rm, prev_w_mr_inr, prev_state_cov);
+                    else if (options.steam.prev_pose_as_prior)
+                        steam_trajectory->addPosePrior(prev_steam_time, prev_T_rm, prev_T_rm_cov);
+                    else if (options.steam.prev_vel_as_prior)
+                        steam_trajectory->addVelocityPrior(prev_steam_time, prev_w_mr_inr, prev_w_mr_inr_cov);
+                } else {
+                    LOG(ERROR) << "[CT_ICP_STEAM] The end of last scan > end of current scan with frame="
+                                << index_frame << ", dt="
+                                << std::setprecision(8) << std::fixed << (curr_time - prev_time) << std::endl;
+                    // throw std::runtime_error("[CT_ICP_STEAM] The end of last scan > beginning of current scan - not possible!");
                 }
                 ready_to_add_prev_state = 2;
             }
@@ -1409,16 +1355,16 @@ namespace ct_icp {
 
             auto &current_estimate = trajectory[index_frame];
 
-            Time begin_time(static_cast<double>(trajectory[index_frame].begin_timestamp));
-            const auto begin_T_mr = inverse(steam_trajectory->getPoseInterpolator(begin_time))->evaluate().matrix();
+            Time begin_steam_time(static_cast<double>(trajectory[index_frame].begin_timestamp));
+            const auto begin_T_mr = inverse(steam_trajectory->getPoseInterpolator(begin_steam_time))->evaluate().matrix();
             const auto begin_T_ms = begin_T_mr * options.steam.T_sr.inverse();
             diff_trans += (current_estimate.begin_t - begin_T_ms.block<3, 1>(0, 3)).norm();
             diff_rot += AngularDistance(current_estimate.begin_R, begin_T_ms.block<3, 3>(0, 0));
             current_estimate.begin_R = begin_T_ms.block<3, 3>(0, 0);
             current_estimate.begin_t = begin_T_ms.block<3, 1>(0, 3);
 
-            Time end_time(static_cast<double>(trajectory[index_frame].end_timestamp));
-            const auto end_T_mr = inverse(steam_trajectory->getPoseInterpolator(end_time))->evaluate().matrix();
+            Time end_steam_time(static_cast<double>(trajectory[index_frame].end_timestamp));
+            const auto end_T_mr = inverse(steam_trajectory->getPoseInterpolator(end_steam_time))->evaluate().matrix();
             const auto end_T_ms = end_T_mr * options.steam.T_sr.inverse();
             diff_trans += (current_estimate.end_t - end_T_ms.block<3, 1>(0, 3)).norm();
             diff_rot += AngularDistance(current_estimate.end_R, end_T_ms.block<3, 3>(0, 0));
@@ -1427,13 +1373,15 @@ namespace ct_icp {
 
             current_estimate.steam_traj = steam_trajectory;
             try {
-                Eigen::MatrixXd begin_time_cov = steam_trajectory->getCovariance(solver, begin_time);
-                current_estimate.begin_T_rm_cov = begin_time_cov.block<6, 6>(0, 0);
-                current_estimate.begin_w_mr_inr_cov = begin_time_cov.block<6, 6>(6, 6);
-                Eigen::MatrixXd end_time_cov = steam_trajectory->getCovariance(solver, end_time);
-                current_estimate.end_T_rm_cov = end_time_cov.block<6, 6>(0, 0);
-                current_estimate.end_w_mr_inr_cov = end_time_cov.block<6, 6>(6, 6);
-                current_estimate.end_state_cov = end_time_cov;
+#if false
+                Eigen::MatrixXd begin_state_cov = steam_trajectory->getCovariance(solver, begin_steam_time);
+                current_estimate.begin_T_rm_cov = begin_state_cov.block<6, 6>(0, 0);
+                current_estimate.begin_w_mr_inr_cov = begin_state_cov.block<6, 6>(6, 6);
+#endif
+                Eigen::MatrixXd end_state_cov = steam_trajectory->getCovariance(solver, end_steam_time);
+                current_estimate.end_T_rm_cov = end_state_cov.block<6, 6>(0, 0);
+                current_estimate.end_w_mr_inr_cov = end_state_cov.block<6, 6>(6, 6);
+                current_estimate.end_state_cov = end_state_cov;
             } catch (const std::runtime_error &) {
                 LOG(ERROR) << "Steam optimization failed! (Cannot query covariance)" << std::endl;
             }
