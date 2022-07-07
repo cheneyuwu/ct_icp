@@ -1041,10 +1041,16 @@ namespace ct_icp {
         Time prev_steam_time(static_cast<double>(prev_time));
         lgmath::se3::Transformation prev_T_rm;
         Eigen::Matrix<double, 6, 1> prev_w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
+        Eigen::Matrix<double, 6, 6> prev_T_rm_cov = Eigen::Matrix<double, 6, 6>::Identity();
+        Eigen::Matrix<double, 6, 6> prev_w_mr_inr_cov = Eigen::Matrix<double, 6, 6>::Identity();
+        Eigen::Matrix<double, 12, 12> prev_state_cov = Eigen::Matrix<double, 12, 12>::Identity();
         auto prev_steam_trajectory = trajectory[index_frame - 1].steam_traj;
         if (prev_steam_trajectory != nullptr) {
             prev_T_rm = prev_steam_trajectory->getPoseInterpolator(prev_steam_time)->evaluate();
             prev_w_mr_inr = prev_steam_trajectory->getVelocityInterpolator(prev_steam_time)->evaluate();
+            prev_T_rm_cov = trajectory[index_frame - 1].end_T_rm_cov;
+            prev_w_mr_inr_cov = trajectory[index_frame - 1].end_w_mr_inr_cov;
+            prev_state_cov = trajectory[index_frame - 1].end_state_cov;
         }
 
         /// New state for this frame
@@ -1137,17 +1143,6 @@ namespace ct_icp {
 
 #if true
             if (options.steam.add_prev_state && ready_to_add_prev_state == 1) {
-                Time begin_time(static_cast<double>(trajectory[index_frame].begin_timestamp));
-
-                Eigen::Matrix<double, 6, 6> prev_T_rm_cov = Eigen::Matrix<double, 6, 6>::Identity();
-                Eigen::Matrix<double, 6, 6> prev_w_mr_inr_cov = Eigen::Matrix<double, 6, 6>::Identity();
-                Eigen::Matrix<double, 12, 12> prev_state_cov = Eigen::Matrix<double, 12, 12>::Identity();
-                if (prev_steam_trajectory != nullptr) {
-                    prev_T_rm_cov = trajectory[index_frame - 1].end_T_rm_cov;
-                    prev_w_mr_inr_cov = trajectory[index_frame - 1].end_w_mr_inr_cov;
-                    prev_state_cov = trajectory[index_frame - 1].end_state_cov;
-                }
-
                 if (prev_time < curr_time) {
                     LOG(INFO) << "[CT_ICP_STEAM] The end of last scan < end of current scan with dt=" << std::setprecision(8) << std::fixed
                                 << (curr_time - prev_time) << std::endl;
@@ -1360,6 +1355,16 @@ namespace ct_icp {
             //Update (changes trajectory data)
             double diff_trans = 0, diff_rot = 0;
 
+            auto &previous_estimate = trajectory[index_frame-1];
+            // Time prev_steam_time(static_cast<double>(trajectory[index_frame-1].end_timestamp));  // already defined
+            const auto prev_T_mr = inverse(steam_trajectory->getPoseInterpolator(prev_steam_time))->evaluate().matrix();
+            const auto prev_T_ms = prev_T_mr * options.steam.T_sr.inverse();
+            previous_estimate.end_R = prev_T_ms.block<3, 3>(0, 0);
+            previous_estimate.end_t = prev_T_ms.block<3, 1>(0, 3);
+
+            previous_estimate.steam_traj = nullptr; // invalidate prev steam_traj;
+
+
             auto &current_estimate = trajectory[index_frame];
 
             Time begin_steam_time(static_cast<double>(trajectory[index_frame].begin_timestamp));
@@ -1380,15 +1385,16 @@ namespace ct_icp {
 
             current_estimate.steam_traj = steam_trajectory;
             try {
-#if false
-                Eigen::MatrixXd begin_state_cov = steam_trajectory->getCovariance(solver, begin_steam_time);
-                current_estimate.begin_T_rm_cov = begin_state_cov.block<6, 6>(0, 0);
-                current_estimate.begin_w_mr_inr_cov = begin_state_cov.block<6, 6>(6, 6);
-#endif
-                Eigen::MatrixXd end_state_cov = steam_trajectory->getCovariance(solver, end_steam_time);
-                current_estimate.end_T_rm_cov = end_state_cov.block<6, 6>(0, 0);
-                current_estimate.end_w_mr_inr_cov = end_state_cov.block<6, 6>(6, 6);
-                current_estimate.end_state_cov = end_state_cov;
+
+                Eigen::MatrixXd prev_end_state_cov = steam_trajectory->getCovariance(solver, prev_steam_time);
+                previous_estimate.end_T_rm_cov = prev_end_state_cov.block<6, 6>(0, 0);
+                previous_estimate.end_w_mr_inr_cov = prev_end_state_cov.block<6, 6>(6, 6);
+                previous_estimate.end_state_cov = prev_end_state_cov;
+
+                Eigen::MatrixXd curr_end_state_cov = steam_trajectory->getCovariance(solver, end_steam_time);
+                current_estimate.end_T_rm_cov = curr_end_state_cov.block<6, 6>(0, 0);
+                current_estimate.end_w_mr_inr_cov = curr_end_state_cov.block<6, 6>(6, 6);
+                current_estimate.end_state_cov = curr_end_state_cov;
             } catch (const std::runtime_error &) {
                 LOG(ERROR) << "Steam optimization failed! (Cannot query covariance)" << std::endl;
             }
