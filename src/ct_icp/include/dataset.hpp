@@ -14,7 +14,8 @@ namespace ct_icp {
         NCLT = 4,
         BOREAS = 5,
         AEVA = 6,
-        PLY_DIRECTORY = 7
+        DICP = 7,
+        PLY_DIRECTORY = 8
     };
 
     class DatasetSequence {

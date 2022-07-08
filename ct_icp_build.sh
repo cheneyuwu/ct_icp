@@ -19,6 +19,7 @@
 #   -v ${HOME}/ASRL/data/boreas:${HOME}/ASRL/data/boreas \
 #   -v /media/yuchen/T7/ASRL/data/kitti_raw:${HOME}/ASRL/data/kitti_raw \
 # 	-v /media/yuchen/T7/ASRL/data/kitti_360:${HOME}/ASRL/data/kitti_360 \
+# 	-v /media/yuchen/T7/ASRL/data/aeva:${HOME}/ASRL/data/aeva \
 #   ct_icp
 
 BUILD_TYPE=$1

@@ -191,6 +191,8 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
       dataset_options.dataset = BOREAS;
     else if (dataset == "AEVA")
       dataset_options.dataset = AEVA;
+    else if (dataset == "DICP")
+      dataset_options.dataset = DICP;
     else if (dataset == "PLY_DIRECTORY")
       dataset_options.dataset = PLY_DIRECTORY;
     else

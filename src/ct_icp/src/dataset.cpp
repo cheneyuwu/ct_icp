@@ -116,6 +116,19 @@ namespace ct_icp {
     const int NUMBER_SEQUENCES_BOREAS = 4;
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /// HARD CODED VALUES FOR DICP (Doppler-ICP paper datasets)
+
+    const char *DICP_SEQUENCE_NAMES[] = {
+            "brisbane-lagoon-freeway",
+            "bunker-road",
+            "bunker-road-vehicles",
+            "robin-williams-tunnel",
+            "san-francisco-city",
+    };
+
+    const int NUMBER_SEQUENCES_DICP = 5;
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
     // Returns the Path to the folder containing a sequence's point cloud Data
@@ -139,6 +152,9 @@ namespace ct_icp {
                 break;
             case AEVA:
                 folder_path += sequence_name + "/aeva/";
+                break;
+            case DICP:
+                folder_path += sequence_name + "/point_clouds/";
                 break;
             case NCLT:
                 throw std::runtime_error("Not Implemented!");
@@ -238,6 +254,9 @@ namespace ct_icp {
             case AEVA:
                 num_sequences = NUMBER_SEQUENCES_BOREAS;
                 break;
+            case DICP:
+                num_sequences = NUMBER_SEQUENCES_DICP;
+                break;
             case PLY_DIRECTORY:
                 num_sequences = 1;
                 break;
@@ -289,6 +308,11 @@ namespace ct_icp {
                     new_sequence_info.sequence_id = i;
                     new_sequence_info.sequence_size = -1;
                     new_sequence_info.sequence_name = BOREAS_SEQUENCE_NAMES[new_sequence_info.sequence_id];
+                    break;
+                case DICP:
+                    new_sequence_info.sequence_id = i;
+                    new_sequence_info.sequence_size = -1;
+                    new_sequence_info.sequence_name = DICP_SEQUENCE_NAMES[new_sequence_info.sequence_id];
                     break;
             }
 
@@ -357,6 +381,8 @@ namespace ct_icp {
             case BOREAS:
             case AEVA:
                 return BOREAS_SEQUENCE_NAMES[sequence_id];
+            case DICP:
+                return DICP_SEQUENCE_NAMES[sequence_id];
             case PLY_DIRECTORY:
                 return "PLY_DIRECTORY";
         }
@@ -469,6 +495,66 @@ namespace ct_icp {
 
         for (int i(0); i < (int) frame.size(); i++) {
             frame[i].timestamp = frame[i].alpha_timestamp + time_delta_sec;
+            frame[i].alpha_timestamp = min(1.0, max(0.0, 1 - (frame_last_timestamp - frame[i].alpha_timestamp) /
+                                                             (frame_last_timestamp - frame_first_timestamp))); //1.0
+        }
+
+        return frame;
+    }
+
+    /* -------------------------------------------------------------------------------------------------------------- */
+    std::vector<Point3D> read_dicp_pointcloud(const DatasetOptions &options, const std::string &path,
+                                              const double &time_sec) {
+        std::vector<Point3D> frame;
+        //read bin file
+        std::ifstream ifs(path, std::ios::binary);
+        std::vector<char> buffer(std::istreambuf_iterator<char>(ifs), {});
+        unsigned float_offset = 4;
+        unsigned fields = 5;  // x, y, z, v, t
+        unsigned point_step = float_offset * fields;
+        unsigned numPointsIn = std::floor(buffer.size() / point_step);
+
+        auto getFloatFromByteArray = [](char *byteArray, unsigned index) -> float {
+            return *((float *)(byteArray + index));
+        };
+
+        double frame_last_timestamp = -1000000000.0;
+        double frame_first_timestamp = std::numeric_limits<double>::max();
+        frame.reserve(numPointsIn);
+        for (int i(0); i < numPointsIn; i++) {
+            Point3D new_point;
+
+            int bufpos = i * point_step;
+            int offset = 0;
+            new_point.raw_pt[0] = getFloatFromByteArray(buffer.data(), bufpos + offset * float_offset);
+            ++offset;
+            new_point.raw_pt[1] = getFloatFromByteArray(buffer.data(), bufpos + offset * float_offset);
+            ++offset;
+            new_point.raw_pt[2] = getFloatFromByteArray(buffer.data(), bufpos + offset * float_offset);
+            new_point.pt = new_point.raw_pt;
+
+            ++offset;
+            new_point.radial_velocity = getFloatFromByteArray(buffer.data(), bufpos + offset * float_offset);
+            ++offset;
+            new_point.alpha_timestamp = getFloatFromByteArray(buffer.data(), bufpos + offset * float_offset);
+
+            if (new_point.alpha_timestamp < frame_first_timestamp) {
+                frame_first_timestamp = new_point.alpha_timestamp;
+            }
+
+            if (new_point.alpha_timestamp > frame_last_timestamp) {
+                frame_last_timestamp = new_point.alpha_timestamp;
+            }
+
+            double r = new_point.raw_pt.norm();
+            if ((r > options.min_dist_lidar_center) && (r < options.max_dist_lidar_center)) {
+                frame.push_back(new_point);
+            }
+        }
+        frame.shrink_to_fit();
+
+        for (int i(0); i < (int) frame.size(); i++) {
+            frame[i].timestamp = time_sec + frame[i].alpha_timestamp / 1e9;
             frame[i].alpha_timestamp = min(1.0, max(0.0, 1 - (frame_last_timestamp - frame[i].alpha_timestamp) /
                                                              (frame_last_timestamp - frame_first_timestamp))); //1.0
         }
@@ -810,6 +896,16 @@ namespace ct_icp {
     }
 
     /* -------------------------------------------------------------------------------------------------------------- */
+    ArrayPoses dicp_transform_trajectory_frame(const vector<TrajectoryFrame> &trajectory) {
+        ArrayPoses poses;
+        poses.reserve(trajectory.size());
+        for (auto &frame: trajectory) {
+            poses.emplace_back(frame.MidPose());
+        }
+        return poses;
+    }
+
+    /* -------------------------------------------------------------------------------------------------------------- */
     ArrayPoses transform_trajectory_frame(const DatasetOptions &options, const vector<TrajectoryFrame> &trajectory,
                                           int sequence_id) {
         switch (options.dataset) {
@@ -851,6 +947,7 @@ namespace ct_icp {
                 return false;
             case BOREAS:
             case AEVA:
+            case DICP:
                 return false;
         }
         throw std::runtime_error("Dataset Option not recognised");
@@ -1148,6 +1245,57 @@ namespace ct_icp {
         int64_t initial_timestamp_micro_;
     };
 
+    /// Iterator for BOREAS and AEVA
+    class DICPIterator : public DatasetSequence {
+    public:
+        explicit DICPIterator(const DatasetOptions &options, int sequence_id = -1) : options_(options),
+                                                                                     sequence_id_(sequence_id) {
+            dir_path_ = pointclouds_dir_path(options_, DICP_SEQUENCE_NAMES[sequence_id_]);
+            auto dir_iter = std::filesystem::directory_iterator(dir_path_);
+            num_frames_ = std::count_if(begin(dir_iter), end(dir_iter),
+                    [this](auto &entry) {
+                        if (entry.is_regular_file()) filenames_.emplace_back(entry.path().filename().string());
+                        return entry.is_regular_file();
+                    });
+            std::sort(filenames_.begin(), filenames_.end());
+            //
+            std::string fname = dir_path_ + "/../" + "ref_poses.txt";
+            std::ifstream ifs(fname, ios::in);
+            for (std::string line; std::getline(ifs, line); ) {
+                stringstream str(line);
+                std::string timestamp;
+                str >> timestamp;
+                timestamps_.push_back(std::stod(timestamp));
+            }
+            filenames_.erase(filenames_.begin());  // remove the first since it is redundant
+            timestamps_.erase(timestamps_.begin());
+        }
+
+        ~DICPIterator() = default;
+
+        std::vector<Point3D> Next() override {
+            int frame_id = frame_id_++;
+            std::vector<Point3D> pc;
+            auto filename = filenames_[frame_id];
+            auto timestamp = timestamps_[frame_id];
+            pc = read_dicp_pointcloud(options_, dir_path_ + "/" + filename, timestamp);
+            return pc;
+        }
+
+        [[nodiscard]] bool HasNext() const override {
+            return frame_id_ < num_frames_;
+        }
+
+    private:
+        std::string dir_path_;
+        std::vector<std::string> filenames_;
+        std::vector<double> timestamps_;
+        DatasetOptions options_;
+        int sequence_id_;
+        int frame_id_ = 0;
+        int num_frames_;
+    };
+
     /* -------------------------------------------------------------------------------------------------------------- */
     std::shared_ptr<DatasetSequence> get_dataset_sequence(const DatasetOptions &options, int sequence_id) {
         switch (options.dataset) {
@@ -1161,6 +1309,8 @@ namespace ct_icp {
             case BOREAS:
             case AEVA:
                 return std::make_shared<BOREASIterator>(options, sequence_id);
+            case DICP:
+                return std::make_shared<DICPIterator>(options, sequence_id);
             case PLY_DIRECTORY:
                 return std::make_shared<DirectoryIterator>(options);
             default:
