@@ -23,7 +23,7 @@ namespace fs = std::filesystem;
 #include "steam_icp/dataset.hpp"
 #include "steam_icp/odometry.hpp"
 #include "steam_icp/point.hpp"
-#include "steam_icp/stopwatch.hpp"
+#include "steam_icp/utils/stopwatch.hpp"
 
 namespace steam_icp {
 
@@ -342,7 +342,7 @@ int main(int argc, char **argv) {
 
     // timers
     std::vector<std::pair<std::string, std::unique_ptr<Stopwatch<>>>> timer;
-    timer.emplace_back("loading .................... ", std::make_unique<Stopwatch<>>(false));
+    timer.emplace_back("loading ..................... ", std::make_unique<Stopwatch<>>(false));
     timer.emplace_back("registration ................ ", std::make_unique<Stopwatch<>>(false));
     timer.emplace_back("visualization ............... ", std::make_unique<Stopwatch<>>(false));
 
@@ -430,7 +430,7 @@ int main(int argc, char **argv) {
     // transform and save the estimated trajectory
     seq->save(options.output_dir, odometry->trajectory());
 
-    /// ground truth
+    // ground truth
     if (seq->hasGroundTruth()) {
       const auto seq_error = seq->evaluate(odometry->trajectory());
       LOG(WARNING) << "Mean RPE : " << seq_error.mean_rpe << std::endl;

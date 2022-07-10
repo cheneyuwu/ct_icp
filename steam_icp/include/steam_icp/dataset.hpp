@@ -58,7 +58,6 @@ class Sequence {
     int index_max_local_err;
     double mean_num_attempts;
   };
-
   virtual bool hasGroundTruth() const { return false; }
   virtual SeqError evaluate(const Trajectory & /* trajectory */) const {
     throw std::runtime_error("no ground truth available");
@@ -125,3 +124,6 @@ struct DatasetRegister {
 
 ///
 #include "steam_icp/datasets/boreas_aeva.hpp"
+#include "steam_icp/datasets/boreas_velodyne.hpp"
+#include "steam_icp/datasets/kitti_360.hpp"
+#include "steam_icp/datasets/kitti_raw.hpp"

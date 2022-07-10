@@ -7,7 +7,7 @@
 
 #include "steam.hpp"
 
-#include "steam_icp/stopwatch.hpp"
+#include "steam_icp/utils/stopwatch.hpp"
 
 namespace steam_icp {
 
