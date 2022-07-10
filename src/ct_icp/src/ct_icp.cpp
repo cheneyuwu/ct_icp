@@ -1051,7 +1051,7 @@ namespace ct_icp {
         T_sr_var->locked() = true;
 
         ///
-        const auto steam_trajectory = const_vel::Interface::MakeShared(options.steam.qc_inv, true);
+        const auto steam_trajectory = const_vel::Interface::MakeShared(options.steam.qc_inv);
         std::vector<StateVarBase::Ptr> steam_state_vars;
         std::vector<BaseCostTerm::ConstPtr> prior_cost_terms;
         StateVarBase::Ptr prev_T_rm_var = nullptr;
@@ -1478,7 +1478,7 @@ namespace ct_icp {
             outfile.open(options.debug_path + "/pose.txt", std::ios_base::app); // append instead of overwrite
             outfile2.open(options.debug_path + "/velocity.txt", std::ios_base::app); // append instead of overwrite
 
-            const auto debug_trajectory = const_vel::Interface::MakeShared(options.steam.qc_inv, true);
+            const auto debug_trajectory = const_vel::Interface::MakeShared(options.steam.qc_inv);
             debug_trajectory->add(pprev_steam_time, SE3StateVar::MakeShared(pprev_T_rm), VSpaceStateVar<6>::MakeShared(pprev_w_mr_inr));
 
             const auto debug_prev_T_rm = steam_trajectory->getPoseInterpolator(prev_steam_time)->evaluate();
