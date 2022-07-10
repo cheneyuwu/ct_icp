@@ -1,0 +1,707 @@
+#include "steam_icp/odometry/steam_icp.hpp"
+
+#include <iomanip>
+#include <random>
+
+#include <glog/logging.h>
+
+#include "steam.hpp"
+
+#include "steam_icp/stopwatch.hpp"
+
+namespace steam_icp {
+
+inline double AngularDistance(const Eigen::Matrix3d &rota, const Eigen::Matrix3d &rotb) {
+  double norm = ((rota * rotb.transpose()).trace() - 1) / 2;
+  norm = std::acos(norm) * 180 / M_PI;
+  return norm;
+}
+
+/* -------------------------------------------------------------------------------------------------------------- */
+// Subsample to keep one random point in every voxel of the current frame
+void sub_sample_frame(std::vector<Point3D> &frame, double size_voxel) {
+  std::unordered_map<Voxel, std::vector<Point3D>> grid;
+  for (int i = 0; i < (int)frame.size(); i++) {
+    auto kx = static_cast<short>(frame[i].pt[0] / size_voxel);
+    auto ky = static_cast<short>(frame[i].pt[1] / size_voxel);
+    auto kz = static_cast<short>(frame[i].pt[2] / size_voxel);
+    grid[Voxel(kx, ky, kz)].push_back(frame[i]);
+  }
+  frame.resize(0);
+  int step = 0;  // to take one random point inside each voxel (but with identical results when lunching the SLAM a
+                 // second time)
+  for (const auto &n : grid) {
+    if (n.second.size() > 0) {
+      // frame.push_back(n.second[step % (int)n.second.size()]);
+      frame.push_back(n.second[0]);
+      step++;
+    }
+  }
+}
+
+/* -------------------------------------------------------------------------------------------------------------- */
+void grid_sampling(const std::vector<Point3D> &frame, std::vector<Point3D> &keypoints, double size_voxel_subsampling) {
+  keypoints.resize(0);
+  std::vector<Point3D> frame_sub;
+  frame_sub.resize(frame.size());
+  for (int i = 0; i < (int)frame_sub.size(); i++) {
+    frame_sub[i] = frame[i];
+  }
+  sub_sample_frame(frame_sub, size_voxel_subsampling);
+  keypoints.reserve(frame_sub.size());
+  for (int i = 0; i < (int)frame_sub.size(); i++) {
+    keypoints.push_back(frame_sub[i]);
+  }
+}
+
+/* -------------------------------------------------------------------------------------------------------------- */
+
+struct Neighborhood {
+  Eigen::Vector3d center = Eigen::Vector3d::Zero();
+  Eigen::Vector3d normal = Eigen::Vector3d::Zero();
+  Eigen::Matrix3d covariance = Eigen::Matrix3d::Identity();
+  double a2D = 1.0;  // Planarity coefficient
+};
+// Computes normal and planarity coefficient
+Neighborhood compute_neighborhood_distribution(const ArrayVector3d &points) {
+  Neighborhood neighborhood;
+  // Compute the normals
+  Eigen::Vector3d barycenter(Eigen::Vector3d(0, 0, 0));
+  for (auto &point : points) {
+    barycenter += point;
+  }
+  barycenter /= (double)points.size();
+  neighborhood.center = barycenter;
+
+  Eigen::Matrix3d covariance_Matrix(Eigen::Matrix3d::Zero());
+  for (auto &point : points) {
+    for (int k = 0; k < 3; ++k)
+      for (int l = k; l < 3; ++l) covariance_Matrix(k, l) += (point(k) - barycenter(k)) * (point(l) - barycenter(l));
+  }
+  covariance_Matrix(1, 0) = covariance_Matrix(0, 1);
+  covariance_Matrix(2, 0) = covariance_Matrix(0, 2);
+  covariance_Matrix(2, 1) = covariance_Matrix(1, 2);
+  neighborhood.covariance = covariance_Matrix;
+  Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> es(covariance_Matrix);
+  Eigen::Vector3d normal(es.eigenvectors().col(0).normalized());
+  neighborhood.normal = normal;
+
+  // Compute planarity from the eigen values
+  double sigma_1 = sqrt(std::abs(es.eigenvalues()[2]));  // Be careful, the eigenvalues are not correct with the
+                                                         // iterative way to compute the covariance matrix
+  double sigma_2 = sqrt(std::abs(es.eigenvalues()[1]));
+  double sigma_3 = sqrt(std::abs(es.eigenvalues()[0]));
+  neighborhood.a2D = (sigma_2 - sigma_3) / sigma_1;
+
+  if (neighborhood.a2D != neighborhood.a2D) {
+    LOG(ERROR) << "FOUND NAN!!!";
+    throw std::runtime_error("error");
+  }
+
+  return neighborhood;
+}
+
+auto SteamOdometry::registerFrame(const std::vector<Point3D> &const_frame) -> RegistrationSummary {
+  RegistrationSummary summary;
+
+  // add a new frame
+  int index_frame = trajectory_.size();
+  trajectory_.emplace_back();
+
+  //
+  initializeMotion(index_frame);
+
+  //
+  auto frame = initializeFrame(index_frame, const_frame);
+
+  //
+  if (index_frame > 0) {
+    double sample_voxel_size =
+        index_frame < options_.init_num_frames ? options_.init_sample_voxel_size : options_.sample_voxel_size;
+
+    // downsample
+    std::vector<Point3D> keypoints;
+    grid_sampling(frame, keypoints, sample_voxel_size);
+    summary.sample_size = (int)keypoints.size();
+
+    // icp
+    icp(index_frame, keypoints, summary);
+    summary.keypoints = keypoints;
+    summary.frame = trajectory_[index_frame];
+    if (!summary.success) return summary;
+
+    // update frame
+    auto q_begin = Eigen::Quaterniond(trajectory_[index_frame].begin_R);
+    auto q_end = Eigen::Quaterniond(trajectory_[index_frame].end_R);
+    Eigen::Vector3d t_begin = trajectory_[index_frame].begin_t;
+    Eigen::Vector3d t_end = trajectory_[index_frame].end_t;
+    for (auto &point : frame) {
+      // Modifies the world point of the frame based on the raw_pt
+      double alpha_timestamp = point.alpha_timestamp;
+      Eigen::Matrix3d R = q_begin.slerp(alpha_timestamp, q_end).normalized().toRotationMatrix();
+      Eigen::Vector3d t = (1.0 - alpha_timestamp) * t_begin + alpha_timestamp * t_end;
+      //
+      point.pt = R * point.raw_pt + t;
+    }
+  }
+  summary.corrected_points = frame;
+
+  // add points
+  const double kSizeVoxelMap = options_.size_voxel_map;
+  const double kMinDistancePoints = options_.min_distance_points;
+  const int kMaxNumPointsInVoxel = options_.max_num_points_in_voxel;
+  if (index_frame == 0 || (!options_.delay_adding_points)) {
+    map_.add(frame, kSizeVoxelMap, kMaxNumPointsInVoxel, kMinDistancePoints);
+  } else {
+    trajectory_[index_frame].points = frame;
+    if (index_frame > 1) {
+      // update frame
+      auto q_begin = Eigen::Quaterniond(trajectory_[index_frame - 1].begin_R);
+      auto q_end = Eigen::Quaterniond(trajectory_[index_frame - 1].end_R);
+      Eigen::Vector3d t_begin = trajectory_[index_frame - 1].begin_t;
+      Eigen::Vector3d t_end = trajectory_[index_frame - 1].end_t;
+      auto &prev_frame = trajectory_[index_frame - 1].points;
+      for (auto &point : prev_frame) {
+        // modifies the world point of the frame based on the raw_pt
+        double alpha_timestamp = point.alpha_timestamp;
+        Eigen::Matrix3d R = q_begin.slerp(alpha_timestamp, q_end).normalized().toRotationMatrix();
+        Eigen::Vector3d t = (1.0 - alpha_timestamp) * t_begin + alpha_timestamp * t_end;
+        //
+        point.pt = R * point.raw_pt + t;
+      }
+      map_.add(prev_frame, kSizeVoxelMap, kMaxNumPointsInVoxel, kMinDistancePoints);
+      prev_frame.clear();
+    }
+  }
+
+  // remove points
+  const double kMaxDistance = options_.max_distance;
+  const Eigen::Vector3d location = trajectory_[index_frame].end_t;
+  map_.remove(location, kMaxDistance);
+
+  // correct all points
+  summary.all_corrected_points = const_frame;
+  auto q_begin = Eigen::Quaterniond(trajectory_[index_frame].begin_R);
+  auto q_end = Eigen::Quaterniond(trajectory_[index_frame].end_R);
+  Eigen::Vector3d t_begin = trajectory_[index_frame].begin_t;
+  Eigen::Vector3d t_end = trajectory_[index_frame].end_t;
+  for (auto &point : summary.all_corrected_points) {
+    double alpha_timestamp = point.alpha_timestamp;
+    Eigen::Matrix3d R = q_begin.slerp(alpha_timestamp, q_end).normalized().toRotationMatrix();
+    Eigen::Vector3d t = (1.0 - alpha_timestamp) * t_begin + alpha_timestamp * t_end;
+    point.pt = R * point.raw_pt + t;
+  }
+
+  return summary;
+}
+
+void SteamOdometry::initializeMotion(int index_frame) {
+  if (index_frame <= 1) {
+    // Initialize first pose at Identity
+    trajectory_[index_frame].begin_R = Eigen::MatrixXd::Identity(3, 3);
+    trajectory_[index_frame].begin_t = Eigen::Vector3d(0., 0., 0.);
+    trajectory_[index_frame].end_R = Eigen::MatrixXd::Identity(3, 3);
+    trajectory_[index_frame].end_t = Eigen::Vector3d(0., 0., 0.);
+  } else {
+    // Different regimen for the second frame due to the bootstrapped elasticity
+    Eigen::Matrix3d R_next_end = trajectory_[index_frame - 1].end_R * trajectory_[index_frame - 2].end_R.inverse() *
+                                 trajectory_[index_frame - 1].end_R;
+    Eigen::Vector3d t_next_end = trajectory_[index_frame - 1].end_t +
+                                 trajectory_[index_frame - 1].end_R * trajectory_[index_frame - 2].end_R.inverse() *
+                                     (trajectory_[index_frame - 1].end_t - trajectory_[index_frame - 2].end_t);
+
+    trajectory_[index_frame].begin_R = trajectory_[index_frame - 1].end_R;
+    trajectory_[index_frame].begin_t = trajectory_[index_frame - 1].end_t;
+    trajectory_[index_frame].end_R = R_next_end;
+    trajectory_[index_frame].end_t = t_next_end;
+  }
+}
+
+std::vector<Point3D> SteamOdometry::initializeFrame(int index_frame, const std::vector<Point3D> &const_frame) {
+  /// PREPROCESS THE INITIAL FRAME
+  double sample_size = index_frame < options_.init_num_frames ? options_.init_voxel_size : options_.voxel_size;
+  std::vector<Point3D> frame(const_frame);
+
+  std::mt19937_64 g;
+  std::shuffle(frame.begin(), frame.end(), g);
+  // Subsample the scan with voxels taking one random in every voxel
+  sub_sample_frame(frame, sample_size);
+  std::shuffle(frame.begin(), frame.end(), g);
+
+  if (index_frame > 1) {
+    auto q_begin = Eigen::Quaterniond(trajectory_[index_frame].begin_R);
+    auto q_end = Eigen::Quaterniond(trajectory_[index_frame].end_R);
+    Eigen::Vector3d t_begin = trajectory_[index_frame].begin_t;
+    Eigen::Vector3d t_end = trajectory_[index_frame].end_t;
+    for (auto &point : frame) {
+      double alpha_timestamp = point.alpha_timestamp;
+      Eigen::Matrix3d R = q_begin.slerp(alpha_timestamp, q_end).normalized().toRotationMatrix();
+      Eigen::Vector3d t = (1.0 - alpha_timestamp) * t_begin + alpha_timestamp * t_end;
+      //
+      point.pt = R * point.raw_pt + t;
+    }
+  }
+
+  double min_timestamp = std::numeric_limits<double>::max();
+  double max_timestamp = std::numeric_limits<double>::min();
+  for (auto &point : frame) {
+    point.index_frame = index_frame;
+    if (point.timestamp > max_timestamp) max_timestamp = point.timestamp;
+    if (point.timestamp < min_timestamp) min_timestamp = point.timestamp;
+  }
+
+  trajectory_[index_frame].begin_timestamp = min_timestamp;
+  trajectory_[index_frame].end_timestamp = max_timestamp;
+
+  return frame;
+}
+
+void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, RegistrationSummary &summary) {
+  using namespace steam;
+  using namespace steam::se3;
+  using namespace steam::traj;
+  using namespace steam::vspace;
+
+  /// Create robot to sensor transform variable, fixed.
+  const auto T_sr_var = SE3StateVar::MakeShared(lgmath::se3::Transformation(options_.T_sr));
+  T_sr_var->locked() = true;
+
+  ///
+  const auto steam_trajectory = const_vel::Interface::MakeShared(options_.qc_inv);
+  std::vector<StateVarBase::Ptr> steam_state_vars;
+  std::vector<BaseCostTerm::ConstPtr> prior_cost_terms;
+  StateVarBase::Ptr prev_T_rm_var = nullptr;
+  StateVarBase::Ptr prev_w_mr_inr_var = nullptr;
+
+  /// use previous trajectory to initialize steam state variables
+  LOG(INFO) << "[CT_ICP_STEAM] prev scan end time: " << trajectory_[index_frame - 1].end_timestamp << std::endl;
+  const double prev_time = trajectory_[index_frame - 1].end_timestamp;
+  Time prev_steam_time(static_cast<double>(prev_time));
+  lgmath::se3::Transformation prev_T_rm;
+  Eigen::Matrix<double, 6, 1> prev_w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
+  Eigen::Matrix<double, 6, 6> prev_T_rm_cov = Eigen::Matrix<double, 6, 6>::Identity();
+  Eigen::Matrix<double, 6, 6> prev_w_mr_inr_cov = Eigen::Matrix<double, 6, 6>::Identity();
+  Eigen::Matrix<double, 12, 12> prev_state_cov = Eigen::Matrix<double, 12, 12>::Identity();
+  auto prev_steam_trajectory = trajectory_[index_frame - 1].steam_traj;
+  if (prev_steam_trajectory != nullptr) {
+    prev_T_rm = prev_steam_trajectory->getPoseInterpolator(prev_steam_time)->evaluate();
+    prev_w_mr_inr = prev_steam_trajectory->getVelocityInterpolator(prev_steam_time)->evaluate();
+    prev_T_rm_cov = trajectory_[index_frame - 1].end_T_rm_cov;
+    prev_w_mr_inr_cov = trajectory_[index_frame - 1].end_w_mr_inr_cov;
+    prev_state_cov = trajectory_[index_frame - 1].end_state_cov;
+  }
+#if true
+  /// only for debugging
+  const double pprev_time = trajectory_[index_frame - 1].begin_timestamp;
+  Time pprev_steam_time(static_cast<double>(pprev_time));
+  lgmath::se3::Transformation pprev_T_rm;
+  Eigen::Matrix<double, 6, 1> pprev_w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
+  if (prev_steam_trajectory != nullptr) {
+    pprev_T_rm = prev_steam_trajectory->getPoseInterpolator(pprev_steam_time)->evaluate();
+    pprev_w_mr_inr = prev_steam_trajectory->getVelocityInterpolator(pprev_steam_time)->evaluate();
+  }
+#endif
+
+  /// New state for this frame
+  LOG(INFO) << "[CT_ICP_STEAM] curr scan end time: " << trajectory_[index_frame].end_timestamp << std::endl;
+  LOG(INFO) << "[CT_ICP_STEAM] total num new states: " << (options_.num_extra_states + 2) << std::endl;
+  const double curr_time = trajectory_[index_frame].end_timestamp;
+  const int num_states = options_.num_extra_states + 2;
+  const double time_diff = (curr_time - prev_time) / (static_cast<double>(num_states) - 1.0);
+  std::vector<double> knot_times;
+  knot_times.reserve(num_states);
+  knot_times.emplace_back(prev_time);
+  for (int i = 0; i < options_.num_extra_states; ++i) {
+    knot_times.emplace_back(prev_time + (double)(i + 1) * time_diff);
+  }
+  knot_times.emplace_back(curr_time);
+
+  for (size_t i = 0; i < knot_times.size(); ++i) {
+    double knot_time = knot_times[i];
+    Time knot_steam_time(knot_time);
+    //
+    const Eigen::Matrix<double, 6, 1> xi_mr_inr_odo((knot_steam_time - prev_steam_time).seconds() * prev_w_mr_inr);
+    const auto knot_T_rm = lgmath::se3::Transformation(xi_mr_inr_odo) * prev_T_rm;
+    const auto T_rm_var = SE3StateVar::MakeShared(knot_T_rm);
+    //
+    const auto w_mr_inr_var = VSpaceStateVar<6>::MakeShared(prev_w_mr_inr);
+    //
+    steam_trajectory->add(knot_steam_time, T_rm_var, w_mr_inr_var);
+    steam_state_vars.emplace_back(T_rm_var);
+    steam_state_vars.emplace_back(w_mr_inr_var);
+    //
+    if (options_.use_vp) {
+      const auto error_func = vspace_error<6>(w_mr_inr_var, Eigen::Matrix<double, 6, 1>::Zero());
+      const auto noise_model = StaticNoiseModel<6>::MakeShared(options_.vp_cov);
+      const auto loss_func = std::make_shared<L2LossFunc>();
+      prior_cost_terms.emplace_back(WeightedLeastSqCostTerm<6>::MakeShared(error_func, noise_model, loss_func));
+    }
+    // cache begin state in case it needs to be locked
+    if (i == 0) {
+      prev_T_rm_var = T_rm_var;
+      prev_w_mr_inr_var = w_mr_inr_var;
+    }
+  }
+
+  // Get evaluator for query points
+  std::vector<Evaluable<const_vel::Interface::PoseType>::ConstPtr> T_ms_intp_eval_vec;
+  std::vector<Evaluable<const_vel::Interface::VelocityType>::ConstPtr> w_ms_ins_intp_eval_vec;
+  T_ms_intp_eval_vec.reserve(keypoints.size());
+  for (const auto &keypoint : keypoints) {
+    const auto query_time =
+        trajectory_[index_frame].begin_timestamp +
+        keypoint.alpha_timestamp * (trajectory_[index_frame].end_timestamp - trajectory_[index_frame].begin_timestamp);
+    // pose
+    const auto T_rm_intp_eval = steam_trajectory->getPoseInterpolator(Time(query_time));
+    const auto T_ms_intp_eval = inverse(compose(T_sr_var, T_rm_intp_eval));
+    T_ms_intp_eval_vec.emplace_back(T_ms_intp_eval);
+    // velocity
+    const auto w_mr_inr_intp_eval = steam_trajectory->getVelocityInterpolator(Time(query_time));
+    const auto w_ms_ins_intp_eval = compose_velocity(T_sr_var, w_mr_inr_intp_eval);
+    w_ms_ins_intp_eval_vec.emplace_back(w_ms_ins_intp_eval);
+  }
+
+  // For the 50 first frames, visit 2 voxels
+  const short nb_voxels_visited = index_frame < options_.init_num_frames ? 2 : 1;
+  int number_keypoints_used = 0;
+  const int kMinNumNeighbors = options_.min_number_neighbors;
+
+  // timers
+  std::vector<std::pair<std::string, std::unique_ptr<Stopwatch<>>>> timer;
+  timer.emplace_back("Association .................... ", std::make_unique<Stopwatch<>>(false));
+  timer.emplace_back("Optimization ................... ", std::make_unique<Stopwatch<>>(false));
+  timer.emplace_back("Update Transform ............... ", std::make_unique<Stopwatch<>>(false));
+  timer.emplace_back("Alignment ...................... ", std::make_unique<Stopwatch<>>(false));
+  std::vector<std::pair<std::string, std::unique_ptr<Stopwatch<>>>> inner_timer;
+  inner_timer.emplace_back("Search Neighbors ............. ", std::make_unique<Stopwatch<>>(false));
+  inner_timer.emplace_back("Compute Normal ............... ", std::make_unique<Stopwatch<>>(false));
+  inner_timer.emplace_back("Add Cost Term ................ ", std::make_unique<Stopwatch<>>(false));
+  bool innerloop_time = (options_.num_threads == 1);
+
+  //
+  int num_iter_icp = index_frame < options_.init_num_frames ? 15 : options_.num_iters_icp;
+  num_iter_icp += options_.no_prev_state_iters;
+  int ready_to_add_prev_state = 0;  // 0=not ready, 1=ready, 2=already added
+  for (int iter(0); iter < num_iter_icp; iter++) {
+    if (!options_.add_prev_state) ready_to_add_prev_state = 2;  // assume already added
+    if (iter >= options_.no_prev_state_iters && ready_to_add_prev_state == 0) ready_to_add_prev_state = 1;
+    LOG_IF(INFO, (ready_to_add_prev_state == 1))
+        << "Iteration " << iter << " with ready_to_add_prev_state set to 1" << std::endl;
+
+#if true
+    if (options_.add_prev_state && ready_to_add_prev_state == 1) {
+      if (prev_time < curr_time) {
+        LOG(INFO) << "[CT_ICP_STEAM] The end of last scan < end of current scan with dt=" << std::setprecision(8)
+                  << std::fixed << (curr_time - prev_time) << std::endl;
+        // lock
+        if (options_.lock_prev_pose) prev_T_rm_var->locked() = true;
+        if (options_.lock_prev_vel) prev_w_mr_inr_var->locked() = true;
+        // prior
+        if (options_.prev_pose_as_prior && options_.prev_vel_as_prior)
+          steam_trajectory->addStatePrior(prev_steam_time, prev_T_rm, prev_w_mr_inr, prev_state_cov);
+        else if (options_.prev_pose_as_prior)
+          steam_trajectory->addPosePrior(prev_steam_time, prev_T_rm, prev_T_rm_cov);
+        else if (options_.prev_vel_as_prior)
+          steam_trajectory->addVelocityPrior(prev_steam_time, prev_w_mr_inr, prev_w_mr_inr_cov);
+      } else {
+        LOG(ERROR) << "[CT_ICP_STEAM] The end of last scan > end of current scan with frame=" << index_frame
+                   << ", dt=" << std::setprecision(8) << std::fixed << (curr_time - prev_time) << std::endl;
+        // throw std::runtime_error("[CT_ICP_STEAM] The end of last scan > beginning of current scan - not possible!");
+      }
+      ready_to_add_prev_state = 2;
+    }
+#endif
+    number_keypoints_used = 0;
+
+    // initialize problem
+    OptimizationProblem problem(/* num_threads */ options_.num_threads);
+
+    // add variables
+    for (const auto &var : steam_state_vars) problem.addStateVariable(var);
+
+    // add prior cost terms
+    steam_trajectory->addPriorCostTerms(problem);
+    for (const auto &prior_cost_term : prior_cost_terms) problem.addCostTerm(prior_cost_term);
+
+    timer[0].second->start();
+
+#pragma omp parallel for num_threads(options_.num_threads)
+    for (int i = 0; i < (int)keypoints.size(); i++) {
+      const auto &keypoint = keypoints[i];
+      const auto &pt_keypoint = keypoint.pt;
+
+      if (innerloop_time) inner_timer[0].second->start();
+
+      // Neighborhood search
+      ArrayVector3d vector_neighbors =
+          map_.searchNeighbors(pt_keypoint, nb_voxels_visited, options_.size_voxel_map, options_.max_number_neighbors);
+
+      if (innerloop_time) inner_timer[0].second->stop();
+
+      if ((int)vector_neighbors.size() < kMinNumNeighbors) {
+        continue;
+      }
+
+      if (innerloop_time) inner_timer[1].second->start();
+
+      // Compute normals from neighbors
+      auto neighborhood = compute_neighborhood_distribution(vector_neighbors);
+      double planarity_weight = neighborhood.a2D;
+      auto &normal = neighborhood.normal;
+
+      if (normal.dot(trajectory_[index_frame].begin_t - pt_keypoint) < 0) {
+        normal = -1.0 * normal;
+      }
+
+      double weight = planarity_weight * planarity_weight;  // planarity_weight**2 much better than planarity_weight
+                                                            // (planarity_weight**3 is not working)
+      Eigen::Vector3d closest_pt_normal = weight * normal;
+
+      Eigen::Vector3d closest_point = vector_neighbors[0];
+
+      double dist_to_plane = normal[0] * (pt_keypoint[0] - closest_point[0]) +
+                             normal[1] * (pt_keypoint[1] - closest_point[1]) +
+                             normal[2] * (pt_keypoint[2] - closest_point[2]);
+
+      if (innerloop_time) inner_timer[1].second->stop();
+
+      if (innerloop_time) inner_timer[2].second->start();
+
+      double max_dist_to_plane =
+          (iter >= options_.p2p_initial_iters ? options_.p2p_refined_max_dist : options_.p2p_initial_max_dist);
+      bool use_p2p = (fabs(dist_to_plane) < max_dist_to_plane);
+      if (use_p2p) {
+        /// \note query and reference point
+        ///   const auto qry_pt = keypoint.raw_pt;
+        ///   const auto ref_pt = closest_point;
+        if (options_.use_rv && options_.merge_p2p_rv) {
+          Eigen::Matrix4d W = Eigen::Matrix4d::Identity();
+          W.block<3, 3>(0, 0) =
+              (closest_pt_normal * closest_pt_normal.transpose() + 1e-5 * Eigen::Matrix3d::Identity());
+          W.block<1, 1>(3, 3) = options_.rv_cov_inv * Eigen::Matrix<double, 1, 1>::Identity();
+          const auto noise_model = StaticNoiseModel<4>::MakeShared(W, NoiseType::INFORMATION);
+
+          const auto &T_ms_intp_eval = T_ms_intp_eval_vec[i];
+          const auto &w_ms_ins_intp_eval = w_ms_ins_intp_eval_vec[i];
+          const auto p2p_error = p2p::p2pError(T_ms_intp_eval, closest_point, keypoint.raw_pt);
+          const auto rv_error = p2p::radialVelError(w_ms_ins_intp_eval, keypoint.raw_pt, keypoint.radial_velocity);
+          const auto error_func = p2p::p2prvError(p2p_error, rv_error);
+
+          // const auto loss_func = L2LossFunc::MakeShared(); /// \todo what loss threshold to use???
+          const auto loss_func = GemanMcClureLossFunc::MakeShared(options_.rv_loss_threshold);
+
+          const auto cost = WeightedLeastSqCostTerm<4>::MakeShared(error_func, noise_model, loss_func);
+
+#pragma omp critical(odometry_cost_term)
+          {
+            problem.addCostTerm(cost);
+
+            number_keypoints_used++;
+          }
+
+        } else {
+          Eigen::Matrix3d W = (closest_pt_normal * closest_pt_normal.transpose() + 1e-5 * Eigen::Matrix3d::Identity());
+          const auto noise_model = StaticNoiseModel<3>::MakeShared(W, NoiseType::INFORMATION);
+
+          const auto &T_ms_intp_eval = T_ms_intp_eval_vec[i];
+          const auto error_func = p2p::p2pError(T_ms_intp_eval, closest_point, keypoint.raw_pt);
+
+          const auto loss_func = [this]() -> BaseLossFunc::Ptr {
+            switch (options_.p2p_loss_func) {
+              case STEAM_LOSS_FUNC::L2:
+                return L2LossFunc::MakeShared();
+              case STEAM_LOSS_FUNC::DCS:
+                return DcsLossFunc::MakeShared(options_.p2p_loss_sigma);
+              case STEAM_LOSS_FUNC::CAUCHY:
+                return CauchyLossFunc::MakeShared(options_.p2p_loss_sigma);
+              case STEAM_LOSS_FUNC::GM:
+                return GemanMcClureLossFunc::MakeShared(options_.p2p_loss_sigma);
+              default:
+                return nullptr;
+            }
+            return nullptr;
+          }();
+
+          const auto cost = WeightedLeastSqCostTerm<3>::MakeShared(error_func, noise_model, loss_func);
+
+#pragma omp critical(odometry_cost_term)
+          {
+            problem.addCostTerm(cost);
+
+            number_keypoints_used++;
+          }
+        }
+      }
+
+      if (options_.use_rv && ((!use_p2p) || (use_p2p && !options_.merge_p2p_rv))) {
+        Eigen::Matrix<double, 1, 1> W = options_.rv_cov_inv * Eigen::Matrix<double, 1, 1>::Identity();
+        const auto noise_model = StaticNoiseModel<1>::MakeShared(W, NoiseType::INFORMATION);
+
+        const auto &w_ms_ins_intp_eval = w_ms_ins_intp_eval_vec[i];
+        const auto error_func = p2p::radialVelError(w_ms_ins_intp_eval, keypoint.raw_pt, keypoint.radial_velocity);
+
+        const auto loss_func = GemanMcClureLossFunc::MakeShared(options_.rv_loss_threshold);
+
+        const auto cost = WeightedLeastSqCostTerm<1>::MakeShared(error_func, noise_model, loss_func);
+
+#pragma omp critical(odometry_cost_term)
+        { problem.addCostTerm(cost); }
+      }
+
+      if (innerloop_time) inner_timer[2].second->stop();
+    }
+
+    timer[0].second->stop();
+
+    if (number_keypoints_used < 100) {
+      std::stringstream ss_out;
+      ss_out << "[CT_ICP]Error : not enough keypoints selected in ct-icp !" << std::endl;
+      ss_out << "[CT_ICP]Number_of_residuals : " << number_keypoints_used << std::endl;
+
+      summary.success = false;
+      summary.error_message = ss_out.str();
+      summary.number_keypoints_used = number_keypoints_used;
+
+      break;
+    }
+
+    timer[1].second->start();
+
+    // Solve
+    using SolverType = VanillaGaussNewtonSolver;
+    SolverType::Params params;
+    params.verbose = options_.verbose;
+    if (options_.add_prev_state && (ready_to_add_prev_state == 2) && (!options_.association_after_adding_prev_state)) {
+      LOG(INFO) << "Changing maxIteration to 20 due to no re-association." << std::endl;
+      params.maxIterations = 20;
+    } else {
+      params.maxIterations = (unsigned int)options_.max_iterations;
+    }
+    SolverType solver(&problem, params);
+    try {
+      solver.optimize();
+    } catch (const decomp_failure &) {
+      LOG(ERROR) << "Steam optimization failed!" << std::endl;
+    }
+
+    timer[1].second->stop();
+
+    timer[2].second->start();
+
+    // Update (changes trajectory data)
+    double diff_trans = 0, diff_rot = 0;
+
+    auto &previous_estimate = trajectory_[index_frame - 1];
+    // Time prev_steam_time(static_cast<double>(trajectory[index_frame-1].end_timestamp));  // already defined
+    const auto prev_T_mr = inverse(steam_trajectory->getPoseInterpolator(prev_steam_time))->evaluate().matrix();
+    const auto prev_T_ms = prev_T_mr * options_.T_sr.inverse();
+    previous_estimate.end_R = prev_T_ms.block<3, 3>(0, 0);
+    previous_estimate.end_t = prev_T_ms.block<3, 1>(0, 3);
+
+    previous_estimate.steam_traj = nullptr;  // invalidate prev steam_traj;
+
+    auto &current_estimate = trajectory_[index_frame];
+
+    Time begin_steam_time(static_cast<double>(trajectory_[index_frame].begin_timestamp));
+    const auto begin_T_mr = inverse(steam_trajectory->getPoseInterpolator(begin_steam_time))->evaluate().matrix();
+    const auto begin_T_ms = begin_T_mr * options_.T_sr.inverse();
+    diff_trans += (current_estimate.begin_t - begin_T_ms.block<3, 1>(0, 3)).norm();
+    diff_rot += AngularDistance(current_estimate.begin_R, begin_T_ms.block<3, 3>(0, 0));
+    current_estimate.begin_R = begin_T_ms.block<3, 3>(0, 0);
+    current_estimate.begin_t = begin_T_ms.block<3, 1>(0, 3);
+
+    Time end_steam_time(static_cast<double>(trajectory_[index_frame].end_timestamp));
+    const auto end_T_mr = inverse(steam_trajectory->getPoseInterpolator(end_steam_time))->evaluate().matrix();
+    const auto end_T_ms = end_T_mr * options_.T_sr.inverse();
+    diff_trans += (current_estimate.end_t - end_T_ms.block<3, 1>(0, 3)).norm();
+    diff_rot += AngularDistance(current_estimate.end_R, end_T_ms.block<3, 3>(0, 0));
+    current_estimate.end_R = end_T_ms.block<3, 3>(0, 0);
+    current_estimate.end_t = end_T_ms.block<3, 1>(0, 3);
+
+    current_estimate.steam_traj = steam_trajectory;
+    try {
+      Eigen::MatrixXd prev_end_state_cov = steam_trajectory->getCovariance(solver, prev_steam_time);
+      previous_estimate.end_T_rm_cov = prev_end_state_cov.block<6, 6>(0, 0);
+      previous_estimate.end_w_mr_inr_cov = prev_end_state_cov.block<6, 6>(6, 6);
+      previous_estimate.end_state_cov = prev_end_state_cov;
+
+      Eigen::MatrixXd curr_end_state_cov = steam_trajectory->getCovariance(solver, end_steam_time);
+      current_estimate.end_T_rm_cov = curr_end_state_cov.block<6, 6>(0, 0);
+      current_estimate.end_w_mr_inr_cov = curr_end_state_cov.block<6, 6>(6, 6);
+      current_estimate.end_state_cov = curr_end_state_cov;
+    } catch (const std::runtime_error &) {
+      LOG(ERROR) << "Steam optimization failed! (Cannot query covariance)" << std::endl;
+    }
+
+    timer[2].second->stop();
+
+    timer[3].second->start();
+
+    // Update keypoints
+#pragma omp parallel for num_threads(options_.num_threads)
+    for (int i = 0; i < (int)keypoints.size(); i++) {
+      auto &keypoint = keypoints[i];
+      const auto &T_ms_intp_eval = T_ms_intp_eval_vec[i];
+
+      const auto T_ms = T_ms_intp_eval->evaluate().matrix();
+      keypoint.pt = T_ms.block<3, 3>(0, 0) * keypoint.raw_pt + T_ms.block<3, 1>(0, 3);
+    }
+
+    timer[3].second->stop();
+
+    summary.success = true;
+    summary.number_keypoints_used = number_keypoints_used;
+
+    if ((index_frame > 1) && iter >= options_.p2p_initial_iters &&
+        (diff_rot < options_.threshold_orientation_norm && diff_trans < options_.threshold_translation_norm)) {
+      if (options_.debug_print) {
+        LOG(INFO) << "CT_ICP: Finished with N=" << iter << " ICP iterations" << std::endl;
+      }
+
+      if (ready_to_add_prev_state == 0)
+        ready_to_add_prev_state = 1;
+      else
+        break;
+    }
+
+    if (options_.add_prev_state && ready_to_add_prev_state == 2 && (!options_.association_after_adding_prev_state))
+      break;
+  }
+
+  /// Debug print
+  if (options_.debug_print) {
+    const auto debug_trajectory = const_vel::Interface::MakeShared(options_.qc_inv);
+    debug_trajectory->add(pprev_steam_time, SE3StateVar::MakeShared(pprev_T_rm),
+                          VSpaceStateVar<6>::MakeShared(pprev_w_mr_inr));
+
+    const auto debug_prev_T_rm = steam_trajectory->getPoseInterpolator(prev_steam_time)->evaluate();
+    const auto debug_prev_w_mr_inr = steam_trajectory->getVelocityInterpolator(prev_steam_time)->evaluate();
+    debug_trajectory->add(prev_steam_time, SE3StateVar::MakeShared(debug_prev_T_rm),
+                          VSpaceStateVar<6>::MakeShared(debug_prev_w_mr_inr));
+
+    const double begin_timestamp = trajectory_[index_frame - 1].begin_timestamp;
+    const double end_timestamp = trajectory_[index_frame - 1].end_timestamp;
+
+    const int num_states = 10;
+    const double time_diff = (end_timestamp - begin_timestamp) / (static_cast<double>(num_states) - 1.0);
+    for (int i = 0; i < num_states; ++i) {
+      Time qry_time(static_cast<double>(begin_timestamp + i * time_diff));
+      const auto T_rm_vec = debug_trajectory->getPoseInterpolator(Time(qry_time))->evaluate().vec();
+      const auto w_mr_inr = debug_trajectory->getVelocityInterpolator(Time(qry_time))->evaluate();
+      pose_debug_file_ << index_frame << " " << qry_time.nanosecs() << " " << T_rm_vec.transpose() << std::endl;
+      velocity_debug_file_ << index_frame << " " << qry_time.nanosecs() << " " << w_mr_inr.transpose() << std::endl;
+    }
+  }
+
+  if (options_.debug_print) {
+    for (size_t i = 0; i < timer.size(); i++)
+      LOG(INFO) << "Elapsed " << timer[i].first << *(timer[i].second) << std::endl;
+    for (size_t i = 0; i < inner_timer.size(); i++)
+      LOG(INFO) << "Elapsed (Inner Loop) " << inner_timer[i].first << *(inner_timer[i].second) << std::endl;
+    LOG(INFO) << "Number iterations CT-ICP : " << options_.num_iters_icp << std::endl;
+    LOG(INFO) << "Translation Begin: " << trajectory_[index_frame].begin_t.transpose() << std::endl;
+    LOG(INFO) << "Translation End: " << trajectory_[index_frame].end_t.transpose() << std::endl;
+  }
+}
+
+}  // namespace steam_icp

@@ -14,3 +14,7 @@ venv
 
 # Commit the .gitignore
 !.gitignore
+
+build/
+install/
+log/
