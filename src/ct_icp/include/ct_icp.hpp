@@ -133,11 +133,13 @@ namespace ct_icp {
         double ls_tolerant_min_threshold = 0.05; // The Tolerant
 
         // Debug params
-        bool debug_print = true; // Whether to output debug information to std::cout
+        bool debug_print = false; // Whether to output debug information to std::cout
 
         bool debug_viz = false; // Whether to pass the key points to the ExplorationEngine
 
         VIZ_MODE viz_mode = TIMESTAMP;
+
+        std::string debug_path = "/tmp/";
 
         /* ---------------------------------------------------------------------------------------------------------- */
         struct {

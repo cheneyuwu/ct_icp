@@ -67,6 +67,7 @@
         ls_tolerant_min_threshold: 0.05 # The tolerant parameter for loss TOLERANT (for CERES solver)
 
         debug_print: true
+        debug_path: /home/yuchen/ASRL/temp/doppler_odometry/boreas/aeva/steam
 
         steam:
           T_sr_vec: [-0.835, -0.39, 0.103, 0.0, 0.0, 0.0] # davids result without side slip

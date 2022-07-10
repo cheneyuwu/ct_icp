@@ -1001,6 +1001,28 @@ namespace ct_icp {
             }
         }
 
+        /// Debug print
+        if (options.debug_print) {
+            std::ofstream outfile;
+            outfile.open(options.debug_path + "/velocity.txt", std::ios_base::app); // append instead of overwrite
+            const double begin_timestamp = trajectory[index_frame].begin_timestamp;
+            const double end_timestamp = trajectory[index_frame].end_timestamp;
+
+            Eigen::Matrix4d begin_T_ms = Eigen::Matrix4d::Identity();
+            begin_T_ms.block<3, 3>(0, 0) = trajectory[index_frame].begin_R;
+            begin_T_ms.block<3, 1>(0, 3) = trajectory[index_frame].begin_t;
+            Eigen::Matrix4d end_T_ms = Eigen::Matrix4d::Identity();
+            end_T_ms.block<3, 3>(0, 0) = trajectory[index_frame].end_R;
+            end_T_ms.block<3, 1>(0, 3) = trajectory[index_frame].end_t;
+            Eigen::Matrix<double, 6, 1> w_ms_ins = lgmath::se3::tran2vec(end_T_ms.inverse() * begin_T_ms) / (end_timestamp - begin_timestamp);
+
+            const int num_states = 10;
+            const double time_diff = (end_timestamp - begin_timestamp) / (static_cast<double>(num_states) - 1.0);
+            for (int i = 0; i < num_states; ++i) {
+                steam::traj::Time qry_time(begin_timestamp + (double)i * time_diff);
+                outfile << index_frame << " " << qry_time.nanosecs() << " " << w_ms_ins.transpose() << std::endl;
+            }
+        }
 
         if (options.debug_print) {
             for (size_t i = 0; i < timer.size(); i++)
@@ -1052,6 +1074,17 @@ namespace ct_icp {
             prev_w_mr_inr_cov = trajectory[index_frame - 1].end_w_mr_inr_cov;
             prev_state_cov = trajectory[index_frame - 1].end_state_cov;
         }
+#if true
+        /// only for debugging
+        const double pprev_time = trajectory[index_frame - 1].begin_timestamp;
+        Time pprev_steam_time(static_cast<double>(pprev_time));
+        lgmath::se3::Transformation pprev_T_rm;
+        Eigen::Matrix<double, 6, 1> pprev_w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
+        if (prev_steam_trajectory != nullptr) {
+            pprev_T_rm = prev_steam_trajectory->getPoseInterpolator(pprev_steam_time)->evaluate();
+            pprev_w_mr_inr = prev_steam_trajectory->getVelocityInterpolator(pprev_steam_time)->evaluate();
+        }
+#endif
 
         /// New state for this frame
         LOG(INFO) << "[CT_ICP_STEAM] curr scan end time: " << trajectory[index_frame].end_timestamp << std::endl;
@@ -1437,6 +1470,33 @@ namespace ct_icp {
                 && ready_to_add_prev_state == 2
                 && (!options.steam.association_after_adding_prev_state))
                 break;
+        }
+
+        /// Debug print
+        if (options.debug_print) {
+            std::ofstream outfile, outfile2;
+            outfile.open(options.debug_path + "/pose.txt", std::ios_base::app); // append instead of overwrite
+            outfile2.open(options.debug_path + "/velocity.txt", std::ios_base::app); // append instead of overwrite
+
+            const auto debug_trajectory = const_vel::Interface::MakeShared(options.steam.qc_inv, true);
+            debug_trajectory->add(pprev_steam_time, SE3StateVar::MakeShared(pprev_T_rm), VSpaceStateVar<6>::MakeShared(pprev_w_mr_inr));
+
+            const auto debug_prev_T_rm = steam_trajectory->getPoseInterpolator(prev_steam_time)->evaluate();
+            const auto debug_prev_w_mr_inr = steam_trajectory->getVelocityInterpolator(prev_steam_time)->evaluate();
+            debug_trajectory->add(prev_steam_time, SE3StateVar::MakeShared(debug_prev_T_rm), VSpaceStateVar<6>::MakeShared(debug_prev_w_mr_inr));
+
+            const double begin_timestamp = trajectory[index_frame - 1].begin_timestamp;
+            const double end_timestamp = trajectory[index_frame - 1].end_timestamp;
+
+            const int num_states = 10;
+            const double time_diff = (end_timestamp - begin_timestamp) / (static_cast<double>(num_states) - 1.0);
+            for (int i = 0; i < num_states; ++i) {
+                Time qry_time(static_cast<double>(begin_timestamp + i * time_diff));
+                const auto T_rm_vec = debug_trajectory->getPoseInterpolator(Time(qry_time))->evaluate().vec();
+                const auto w_mr_inr = debug_trajectory->getVelocityInterpolator(Time(qry_time))->evaluate();
+                outfile << index_frame << " " << qry_time.nanosecs() << " " << T_rm_vec.transpose() << std::endl;
+                outfile2 << index_frame << " " << qry_time.nanosecs() << " " << w_mr_inr.transpose() << std::endl;
+            }
         }
 
         if (options.debug_print) {

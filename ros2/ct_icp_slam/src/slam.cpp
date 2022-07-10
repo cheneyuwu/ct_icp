@@ -381,6 +381,8 @@ ct_icp::SLAMOptions load_options(const rclcpp::Node::SharedPtr &node) {
                    << "TIMESTAMP";
     }
 
+    ROS2_PARAM_CLAUSE(node, ct_icp_options, prefix, debug_path, std::string);
+
     {
       auto &steam = options.odometry_options.ct_icp_options.steam;
       prefix = "odometry_options.ct_icp_options.steam.";

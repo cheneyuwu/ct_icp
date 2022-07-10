@@ -65,3 +65,4 @@
         ls_tolerant_min_threshold: 0.05 # The tolerant parameter for loss TOLERANT (for CERES solver)
 
         debug_print: true
+        debug_path: /home/yuchen/ASRL/temp/doppler_odometry/kitti_360/elastic
