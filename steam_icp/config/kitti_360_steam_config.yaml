@@ -1,11 +1,11 @@
 /**:
   ros__parameters:
-    log_dir: /home/yuchen/ASRL/temp/doppler_odometry/kitti_360/steam_temp
+    log_dir: /home/yuchen/ASRL/temp/doppler_odometry/kitti_360/steam
 
     # SLAM OPTIONS ----
     save_trajectory: true
     suspend_on_failure: false
-    output_dir: /home/yuchen/ASRL/temp/doppler_odometry/kitti_360/steam_temp
+    output_dir: /home/yuchen/ASRL/temp/doppler_odometry/kitti_360/steam
 
     # VISUALIZATION OPTIONS ----
     visualization_options:
@@ -17,7 +17,7 @@
     # DATASET OPTIONS ----
     dataset: KITTI_360 # Options: [KITTI_raw / KITTI_CARLA / KITTI / KITTI-360 / BOREAS / AEVA]
     dataset_options:
-      all_sequences: false
+      all_sequences: true
       root_path: /home/yuchen/ASRL/data/kitti_360
       sequence: "00"
       min_dist_lidar_center: 5.0
@@ -40,7 +40,7 @@
       num_iters_icp: 10 # The number of iterations of the ICP
 
       debug_print: true
-      debug_path: /home/yuchen/ASRL/temp/doppler_odometry/kitti_360/steam_temp
+      debug_path: /home/yuchen/ASRL/temp/doppler_odometry/kitti_360/steam
 
       steam:
         T_sr_vec: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
