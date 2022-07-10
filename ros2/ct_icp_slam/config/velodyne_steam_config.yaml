@@ -16,10 +16,10 @@
 
     # VISUALIZATION OPTIONS ----
     visualization_options:
-      odometry: true
-      raw_points: true
-      sampled_points: true
-      map_points: true
+      odometry: false
+      raw_points: false
+      sampled_points: false
+      map_points: false
       T_sr_vec: [-0.44, -0.19,  0.21,  0., 0.,  0.81897]
 
     # DATASET OPTIONS ----
