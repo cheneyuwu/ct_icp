@@ -361,7 +361,7 @@ int main(int argc, char **argv) {
       }
       timer[2].second->stop();
 
-      LOG(WARNING) << "Processing frame " << seq->currFrame() << std::endl;
+      LOG(INFO) << "Processing frame " << seq->currFrame() << std::endl;
       timer[1].second->start();
       const auto summary = odometry->registerFrame(frame);
       timer[1].second->stop();
