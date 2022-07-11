@@ -279,9 +279,9 @@ void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regist
   Time prev_steam_time(static_cast<double>(prev_time));
   lgmath::se3::Transformation prev_T_rm;
   Eigen::Matrix<double, 6, 1> prev_w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
-  Eigen::Matrix<double, 6, 6> prev_T_rm_cov = Eigen::Matrix<double, 6, 6>::Identity();
-  Eigen::Matrix<double, 6, 6> prev_w_mr_inr_cov = Eigen::Matrix<double, 6, 6>::Identity();
-  Eigen::Matrix<double, 12, 12> prev_state_cov = Eigen::Matrix<double, 12, 12>::Identity();
+  Eigen::Matrix<double, 6, 6> prev_T_rm_cov = Eigen::Matrix<double, 6, 6>::Identity() * 1e-4;
+  Eigen::Matrix<double, 6, 6> prev_w_mr_inr_cov = Eigen::Matrix<double, 6, 6>::Identity() * 1e-4;
+  Eigen::Matrix<double, 12, 12> prev_state_cov = Eigen::Matrix<double, 12, 12>::Identity() * 1e-4;
   auto prev_steam_trajectory = trajectory_[index_frame - 1].steam_traj;
   if (prev_steam_trajectory != nullptr) {
     prev_T_rm = prev_steam_trajectory->getPoseInterpolator(prev_steam_time)->evaluate();
