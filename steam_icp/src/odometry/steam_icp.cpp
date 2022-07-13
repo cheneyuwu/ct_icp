@@ -11,6 +11,8 @@
 
 namespace steam_icp {
 
+namespace {
+
 inline double AngularDistance(const Eigen::Matrix3d &rota, const Eigen::Matrix3d &rotb) {
   double norm = ((rota * rotb.transpose()).trace() - 1) / 2;
   norm = std::acos(norm) * 180 / M_PI;
@@ -100,6 +102,8 @@ Neighborhood compute_neighborhood_distribution(const ArrayVector3d &points) {
 
   return neighborhood;
 }
+
+}  // namespace
 
 auto SteamOdometry::registerFrame(const std::vector<Point3D> &const_frame) -> RegistrationSummary {
   RegistrationSummary summary;

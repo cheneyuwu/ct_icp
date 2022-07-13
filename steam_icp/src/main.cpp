@@ -167,6 +167,8 @@ steam_icp::SLAMOptions loadOptions(const rclcpp::Node::SharedPtr &node) {
     ROS2_PARAM_CLAUSE(node, options, prefix, odometry, std::string);
     if (options.odometry == "STEAM")
       options.odometry_options = std::make_shared<SteamOdometry::Options>();
+    else if (options.odometry == "SPLINE")
+      options.odometry_options = std::make_shared<SplineOdometry::Options>();
     else
       throw std::invalid_argument{"Unknown odometry type!"};
 
@@ -269,6 +271,54 @@ steam_icp::SLAMOptions loadOptions(const rclcpp::Node::SharedPtr &node) {
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, num_threads, int);
 
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, delay_adding_points, bool);
+
+    } else if (options.odometry == "SPLINE") {
+      auto &spline_icp_options = dynamic_cast<SplineOdometry::Options &>(odometry_options);
+      prefix = "odometry_options.spline.";
+
+      std::vector<double> T_sr_vec;
+      ROS2_PARAM_NO_LOG(node, T_sr_vec, prefix, T_sr_vec, std::vector<double>);
+      if ((T_sr_vec.size() != 6) && (T_sr_vec.size() != 0))
+        throw std::invalid_argument{"T_sr malformed. Must be 6 elements!"};
+      if (T_sr_vec.size() == 6)
+        spline_icp_options.T_sr = lgmath::se3::vec2tran(Eigen::Matrix<double, 6, 1>(T_sr_vec.data()));
+      LOG(WARNING) << "Parameter " << prefix + "T_sr"
+                   << " = " << std::endl
+                   << spline_icp_options.T_sr << std::endl;
+
+      ROS2_PARAM_CLAUSE(node, spline_icp_options, prefix, knot_spacing, double);
+
+      std::vector<double> vp_cov_diag;
+      ROS2_PARAM_NO_LOG(node, vp_cov_diag, prefix, vp_cov_diag, std::vector<double>);
+      if ((vp_cov_diag.size() != 6) && (vp_cov_diag.size() != 0))
+        throw std::invalid_argument{"Velocity prior cov malformed. Must be 6 elements!"};
+      if (vp_cov_diag.size() == 6)
+        spline_icp_options.vp_cov.diagonal() << vp_cov_diag[0], vp_cov_diag[1], vp_cov_diag[2], vp_cov_diag[3],
+            vp_cov_diag[4], vp_cov_diag[5];
+      LOG(WARNING) << "Parameter " << prefix + "vp_cov_diag"
+                   << " = " << spline_icp_options.vp_cov.diagonal().transpose() << std::endl;
+
+      std::string rv_loss_func;
+      ROS2_PARAM(node, rv_loss_func, prefix, rv_loss_func, std::string);
+      if (rv_loss_func == "L2")
+        spline_icp_options.rv_loss_func = SplineOdometry::STEAM_LOSS_FUNC::L2;
+      else if (rv_loss_func == "DCS")
+        spline_icp_options.rv_loss_func = SplineOdometry::STEAM_LOSS_FUNC::DCS;
+      else if (rv_loss_func == "CAUCHY")
+        spline_icp_options.rv_loss_func = SplineOdometry::STEAM_LOSS_FUNC::CAUCHY;
+      else if (rv_loss_func == "GM")
+        spline_icp_options.rv_loss_func = SplineOdometry::STEAM_LOSS_FUNC::GM;
+      else {
+        LOG(WARNING) << "Parameter " << prefix + "rv_loss_func"
+                     << " not specified. Using default value: "
+                     << "L2";
+      }
+      ROS2_PARAM_CLAUSE(node, spline_icp_options, prefix, rv_cov_inv, double);
+      ROS2_PARAM_CLAUSE(node, spline_icp_options, prefix, rv_loss_threshold, double);
+
+      ROS2_PARAM_CLAUSE(node, spline_icp_options, prefix, verbose, bool);
+      ROS2_PARAM_CLAUSE(node, spline_icp_options, prefix, max_iterations, int);
+      ROS2_PARAM_CLAUSE(node, spline_icp_options, prefix, num_threads, int);
     }
   }
 
@@ -349,6 +399,8 @@ int main(int argc, char **argv) {
     const auto odometry = Odometry::Get(options.odometry, *options.odometry_options);
     bool odometry_success = true;
     while (seq->hasNext()) {
+      LOG(INFO) << "Processing frame " << seq->currFrame() << std::endl;
+
       timer[0].second->start();
       auto frame = seq->next();
       timer[0].second->stop();
@@ -361,7 +413,6 @@ int main(int argc, char **argv) {
       }
       timer[2].second->stop();
 
-      LOG(INFO) << "Processing frame " << seq->currFrame() << std::endl;
       timer[1].second->start();
       const auto summary = odometry->registerFrame(frame);
       timer[1].second->stop();
