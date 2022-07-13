@@ -210,16 +210,18 @@ def main(args=None):
   node = Node("boreas_plotter")
 
   # seq = 'boreas-2022-05-13-09-23'
-  seq = 'boreas-2022-05-13-10-30'
+  # seq = 'boreas-2022-05-13-10-30'
   # seq = 'boreas-2022-05-13-11-47'
+  seq = 'boreas-2022-05-18-17-23'
 
   dataset_dir = '/home/yuchen/ASRL/data/boreas/sequences'
   sensor = "aeva"
 
   result_dirs = [
-    osp.join("/home/yuchen/ASRL/temp/doppler_odometry/boreas", sensor, "doppler_icp/boreas_odometry_result"),
     # osp.join("/home/yuchen/ASRL/temp/doppler_odometry/boreas", sensor, "elastic/boreas_odometry_result"),
-    # osp.join("/home/yuchen/ASRL/temp/doppler_odometry/boreas", sensor, "steam/boreas_odometry_result"),
+    # osp.join("/home/yuchen/ASRL/temp/doppler_odometry_obelisk/boreas", sensor, "steam_0705/boreas_odometry_result"),
+    osp.join("/home/yuchen/ASRL/temp/doppler_odometry_obelisk/boreas", sensor, "steam_0707/boreas_odometry_result"),
+    # osp.join("/home/yuchen/ASRL/temp/doppler_odometry/boreas", sensor, "steam_rv_prior_noasso/boreas_odometry_result"),
   ]
 
   T_applanix_sensor = np.loadtxt(osp.join(dataset_dir, seq, 'calib', 'T_applanix_' + sensor + '.txt'))
@@ -228,6 +230,15 @@ def main(args=None):
   gt_T_a0_at_list = []
   for T_aw in T_aw_list:
     gt_T_a0_at_list.append(T_aw_list[0] @ get_inverse_tf(T_aw))
+
+  # T_as = np.array(
+  #   [[0.0, -1.0,  0.0, 0.0],
+  #    [1.0,  0.0,  0.0, 0.0],
+  #    [0.0,  0.0,  1.0, 0.0],
+  #    [0.0,  0.0,  0.0, 1.0]]
+  # )
+  # for i in range(len(gt_T_a0_at_list)):
+  #   gt_T_a0_at_list[i] = get_inverse_tf(T_as) @ gt_T_a0_at_list[i] @ T_as
 
   gt_T_a0_at_list_sampled = gt_T_a0_at_list[::10]  # downsample
   path = poses2path(gt_T_a0_at_list_sampled, Time(seconds=0).to_msg(), 'map')
