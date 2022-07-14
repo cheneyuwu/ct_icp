@@ -49,7 +49,8 @@ class BoreasAevaDataset : public Dataset {
       "boreas-2022-05-13-09-23",  // highway 7
       "boreas-2022-05-13-10-30",  // marc santi
       "boreas-2022-05-13-11-47",  // glen shields
-      "boreas-2022-05-18-17-23"   // cocksfield
+      "boreas-2022-05-18-17-23",  // cocksfield
+      "boreas-2022-07-08-15-55",  // debug (static)
   };
 
   STEAM_ICP_REGISTER_DATASET("AEVA", BoreasAevaDataset);
