@@ -201,12 +201,10 @@ void SplineOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regis
   timer[1].second->start();
 
   // Solve
-  using SolverType = VanillaGaussNewtonSolver;
-  SolverType::Params params;
+  GaussNewtonSolver::Params params;
   params.verbose = options_.verbose;
-  params.maxIterations = (unsigned int)options_.max_iterations;
-  SolverType solver(&problem, params);
-  solver.optimize();
+  params.max_iterations = (unsigned int)options_.max_iterations;
+  GaussNewtonSolver(problem, params).optimize();
 
   timer[1].second->stop();
 

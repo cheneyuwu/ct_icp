@@ -105,6 +105,15 @@ Neighborhood compute_neighborhood_distribution(const ArrayVector3d &points) {
 
 }  // namespace
 
+SteamOdometry::SteamOdometry(const Options &options) : Odometry(options), options_(options) {
+  // iniitalize steam vars
+  T_sr_var_ = steam::se3::SE3StateVar::MakeShared(lgmath::se3::Transformation(options_.T_sr));
+  T_sr_var_->locked() = true;
+
+  pose_debug_file_.open(options_.debug_path + "/pose.txt", std::ios::out);
+  velocity_debug_file_.open(options_.debug_path + "/velocity.txt", std::ios::out);
+}
+
 auto SteamOdometry::registerFrame(const std::vector<Point3D> &const_frame) -> RegistrationSummary {
   RegistrationSummary summary;
 
@@ -266,34 +275,12 @@ void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regist
   using namespace steam::traj;
   using namespace steam::vspace;
 
-  /// Create robot to sensor transform variable, fixed.
-  const auto T_sr_var = SE3StateVar::MakeShared(lgmath::se3::Transformation(options_.T_sr));
-  T_sr_var->locked() = true;
-
   ///
   const auto steam_trajectory = const_vel::Interface::MakeShared(options_.qc_inv);
   std::vector<StateVarBase::Ptr> steam_state_vars;
   std::vector<BaseCostTerm::ConstPtr> prior_cost_terms;
-  StateVarBase::Ptr prev_T_rm_var = nullptr;
-  StateVarBase::Ptr prev_w_mr_inr_var = nullptr;
 
-  /// use previous trajectory to initialize steam state variables
-  LOG(INFO) << "[CT_ICP_STEAM] prev scan end time: " << trajectory_[index_frame - 1].end_timestamp << std::endl;
-  const double prev_time = trajectory_[index_frame - 1].end_timestamp;
-  Time prev_steam_time(static_cast<double>(prev_time));
-  lgmath::se3::Transformation prev_T_rm;
-  Eigen::Matrix<double, 6, 1> prev_w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
-  Eigen::Matrix<double, 6, 6> prev_T_rm_cov = Eigen::Matrix<double, 6, 6>::Identity() * 1e-4;
-  Eigen::Matrix<double, 6, 6> prev_w_mr_inr_cov = Eigen::Matrix<double, 6, 6>::Identity() * 1e-4;
-  Eigen::Matrix<double, 12, 12> prev_state_cov = Eigen::Matrix<double, 12, 12>::Identity() * 1e-4;
   auto prev_steam_trajectory = trajectory_[index_frame - 1].steam_traj;
-  if (prev_steam_trajectory != nullptr) {
-    prev_T_rm = prev_steam_trajectory->getPoseInterpolator(prev_steam_time)->evaluate();
-    prev_w_mr_inr = prev_steam_trajectory->getVelocityInterpolator(prev_steam_time)->evaluate();
-    prev_T_rm_cov = trajectory_[index_frame - 1].end_T_rm_cov;
-    prev_w_mr_inr_cov = trajectory_[index_frame - 1].end_w_mr_inr_cov;
-    prev_state_cov = trajectory_[index_frame - 1].end_state_cov;
-  }
 #if true
   /// only for debugging
   const double pprev_time = trajectory_[index_frame - 1].begin_timestamp;
@@ -305,6 +292,25 @@ void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regist
     pprev_w_mr_inr = prev_steam_trajectory->getVelocityInterpolator(pprev_steam_time)->evaluate();
   }
 #endif
+
+  /// use previous trajectory to initialize steam state variables
+  LOG(INFO) << "[CT_ICP_STEAM] prev scan end time: " << trajectory_[index_frame - 1].end_timestamp << std::endl;
+  const double prev_time = trajectory_[index_frame - 1].end_timestamp;
+  Time prev_steam_time(static_cast<double>(prev_time));
+  lgmath::se3::Transformation prev_T_rm;
+  Eigen::Matrix<double, 6, 1> prev_w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
+  Eigen::Matrix<double, 6, 6> prev_T_rm_cov = Eigen::Matrix<double, 6, 6>::Identity() * 1e-4;
+  Eigen::Matrix<double, 6, 6> prev_w_mr_inr_cov = Eigen::Matrix<double, 6, 6>::Identity() * 1e-4;
+  Eigen::Matrix<double, 12, 12> prev_state_cov = Eigen::Matrix<double, 12, 12>::Identity() * 1e-4;
+  if (prev_steam_trajectory != nullptr) {
+    prev_T_rm = prev_steam_trajectory->getPoseInterpolator(prev_steam_time)->evaluate();
+    prev_w_mr_inr = prev_steam_trajectory->getVelocityInterpolator(prev_steam_time)->evaluate();
+    prev_T_rm_cov = trajectory_[index_frame - 1].end_T_rm_cov;
+    prev_w_mr_inr_cov = trajectory_[index_frame - 1].end_w_mr_inr_cov;
+    prev_state_cov = trajectory_[index_frame - 1].end_state_cov;
+  }
+  StateVarBase::Ptr prev_T_rm_var = nullptr;
+  StateVarBase::Ptr prev_w_mr_inr_var = nullptr;
 
   /// New state for this frame
   LOG(INFO) << "[CT_ICP_STEAM] curr scan end time: " << trajectory_[index_frame].end_timestamp << std::endl;
@@ -357,11 +363,11 @@ void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regist
         keypoint.alpha_timestamp * (trajectory_[index_frame].end_timestamp - trajectory_[index_frame].begin_timestamp);
     // pose
     const auto T_rm_intp_eval = steam_trajectory->getPoseInterpolator(Time(query_time));
-    const auto T_ms_intp_eval = inverse(compose(T_sr_var, T_rm_intp_eval));
+    const auto T_ms_intp_eval = inverse(compose(T_sr_var_, T_rm_intp_eval));
     T_ms_intp_eval_vec.emplace_back(T_ms_intp_eval);
     // velocity
     const auto w_mr_inr_intp_eval = steam_trajectory->getVelocityInterpolator(Time(query_time));
-    const auto w_ms_ins_intp_eval = compose_velocity(T_sr_var, w_mr_inr_intp_eval);
+    const auto w_ms_ins_intp_eval = compose_velocity(T_sr_var_, w_mr_inr_intp_eval);
     w_ms_ins_intp_eval_vec.emplace_back(w_ms_ins_intp_eval);
   }
 
@@ -572,21 +578,16 @@ void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regist
     timer[1].second->start();
 
     // Solve
-    using SolverType = VanillaGaussNewtonSolver;
-    SolverType::Params params;
+    GaussNewtonSolver::Params params;
     params.verbose = options_.verbose;
     if (options_.add_prev_state && (ready_to_add_prev_state == 2) && (!options_.association_after_adding_prev_state)) {
       LOG(INFO) << "Changing maxIteration to 20 due to no re-association." << std::endl;
-      params.maxIterations = 20;
+      params.max_iterations = 20;
     } else {
-      params.maxIterations = (unsigned int)options_.max_iterations;
+      params.max_iterations = (unsigned int)options_.max_iterations;
     }
-    SolverType solver(&problem, params);
-    try {
-      solver.optimize();
-    } catch (const decomp_failure &) {
-      LOG(ERROR) << "Steam optimization failed!" << std::endl;
-    }
+    GaussNewtonSolver(problem, params).optimize();
+    Covariance covariance(problem);
 
     timer[1].second->stop();
 
@@ -623,19 +624,16 @@ void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regist
     current_estimate.end_t = end_T_ms.block<3, 1>(0, 3);
 
     current_estimate.steam_traj = steam_trajectory;
-    try {
-      Eigen::MatrixXd prev_end_state_cov = steam_trajectory->getCovariance(solver, prev_steam_time);
-      previous_estimate.end_T_rm_cov = prev_end_state_cov.block<6, 6>(0, 0);
-      previous_estimate.end_w_mr_inr_cov = prev_end_state_cov.block<6, 6>(6, 6);
-      previous_estimate.end_state_cov = prev_end_state_cov;
 
-      Eigen::MatrixXd curr_end_state_cov = steam_trajectory->getCovariance(solver, end_steam_time);
-      current_estimate.end_T_rm_cov = curr_end_state_cov.block<6, 6>(0, 0);
-      current_estimate.end_w_mr_inr_cov = curr_end_state_cov.block<6, 6>(6, 6);
-      current_estimate.end_state_cov = curr_end_state_cov;
-    } catch (const std::runtime_error &) {
-      LOG(ERROR) << "Steam optimization failed! (Cannot query covariance)" << std::endl;
-    }
+    Eigen::MatrixXd prev_end_state_cov = steam_trajectory->getCovariance(covariance, prev_steam_time);
+    previous_estimate.end_T_rm_cov = prev_end_state_cov.block<6, 6>(0, 0);
+    previous_estimate.end_w_mr_inr_cov = prev_end_state_cov.block<6, 6>(6, 6);
+    previous_estimate.end_state_cov = prev_end_state_cov;
+
+    Eigen::MatrixXd curr_end_state_cov = steam_trajectory->getCovariance(covariance, end_steam_time);
+    current_estimate.end_T_rm_cov = curr_end_state_cov.block<6, 6>(0, 0);
+    current_estimate.end_w_mr_inr_cov = curr_end_state_cov.block<6, 6>(6, 6);
+    current_estimate.end_state_cov = curr_end_state_cov;
 
     timer[2].second->stop();
 

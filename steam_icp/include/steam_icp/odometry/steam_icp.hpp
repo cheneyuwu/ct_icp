@@ -49,10 +49,7 @@ class SteamOdometry : public Odometry {
     bool delay_adding_points = false;
   };
 
-  SteamOdometry(const Options &options) : Odometry(options), options_(options) {
-    pose_debug_file_.open(options_.debug_path + "/pose.txt", std::ios::out);
-    velocity_debug_file_.open(options_.debug_path + "/velocity.txt", std::ios::out);
-  }
+  SteamOdometry(const Options &options);
 
   RegistrationSummary registerFrame(const std::vector<Point3D> &frame) override;
 
@@ -63,6 +60,9 @@ class SteamOdometry : public Odometry {
 
  private:
   const Options options_;
+
+  // steam variables
+  steam::se3::SE3StateVar::Ptr T_sr_var_ = nullptr;  // robot to sensor transformation as a steam variable
 
   std::ofstream pose_debug_file_;
   std::ofstream velocity_debug_file_;

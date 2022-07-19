@@ -112,5 +112,5 @@ struct OdometryRegister {
 }  // namespace steam_icp
 
 ///
-#include "steam_icp/odometry/steam_icp.hpp"
 #include "steam_icp/odometry/spline_icp.hpp"
+#include "steam_icp/odometry/steam_icp.hpp"
