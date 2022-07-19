@@ -1,6 +1,8 @@
 #include "steam_icp/odometry/steam_icp.hpp"
 
-#include <iomanip>
+#include <chrono>
+#include <fstream>
+#include <iomanip>  // put_time
 #include <random>
 
 #include <glog/logging.h>
@@ -110,8 +112,10 @@ SteamOdometry::SteamOdometry(const Options &options) : Odometry(options), option
   T_sr_var_ = steam::se3::SE3StateVar::MakeShared(lgmath::se3::Transformation(options_.T_sr));
   T_sr_var_->locked() = true;
 
-  pose_debug_file_.open(options_.debug_path + "/pose.txt", std::ios::out);
-  velocity_debug_file_.open(options_.debug_path + "/velocity.txt", std::ios::out);
+  auto now = std::chrono::system_clock::now();
+  auto utc = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
+  pose_debug_file_.open(options_.debug_path + "/pose_" + std::to_string(utc) + ".txt", std::ios::out);
+  velocity_debug_file_.open(options_.debug_path + "/velocity_" + std::to_string(utc) + ".txt", std::ios::out);
 }
 
 auto SteamOdometry::registerFrame(const std::vector<Point3D> &const_frame) -> RegistrationSummary {
