@@ -590,8 +590,9 @@ void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regist
     } else {
       params.max_iterations = (unsigned int)options_.max_iterations;
     }
-    GaussNewtonSolver(problem, params).optimize();
-    Covariance covariance(problem);
+    GaussNewtonSolver solver(problem, params);
+    solver.optimize();
+    Covariance covariance(solver);
 
     timer[1].second->stop();
 
