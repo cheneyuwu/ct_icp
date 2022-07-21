@@ -167,6 +167,8 @@ steam_icp::SLAMOptions loadOptions(const rclcpp::Node::SharedPtr &node) {
     ROS2_PARAM_CLAUSE(node, options, prefix, odometry, std::string);
     if (options.odometry == "STEAM")
       options.odometry_options = std::make_shared<SteamOdometry::Options>();
+    else if (options.odometry == "STEAM2")
+      options.odometry_options = std::make_shared<SteamOdometry2::Options>();
     else if (options.odometry == "SPLINE")
       options.odometry_options = std::make_shared<SplineOdometry::Options>();
     else
@@ -271,7 +273,82 @@ steam_icp::SLAMOptions loadOptions(const rclcpp::Node::SharedPtr &node) {
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, num_threads, int);
 
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, delay_adding_points, bool);
+    } else if (options.odometry == "STEAM2") {
+      auto &steam_icp_options = dynamic_cast<SteamOdometry2::Options &>(odometry_options);
+      prefix = "odometry_options.steam.";
 
+      std::vector<double> T_sr_vec;
+      ROS2_PARAM_NO_LOG(node, T_sr_vec, prefix, T_sr_vec, std::vector<double>);
+      if ((T_sr_vec.size() != 6) && (T_sr_vec.size() != 0))
+        throw std::invalid_argument{"T_sr malformed. Must be 6 elements!"};
+      if (T_sr_vec.size() == 6)
+        steam_icp_options.T_sr = lgmath::se3::vec2tran(Eigen::Matrix<double, 6, 1>(T_sr_vec.data()));
+      LOG(WARNING) << "Parameter " << prefix + "T_sr"
+                   << " = " << std::endl
+                   << steam_icp_options.T_sr << std::endl;
+
+      std::vector<double> qc_inv_diag;
+      ROS2_PARAM_NO_LOG(node, qc_inv_diag, prefix, qc_inv_diag, std::vector<double>);
+      if ((qc_inv_diag.size() != 6) && (qc_inv_diag.size() != 0))
+        throw std::invalid_argument{"Qc diagonal malformed. Must be 6 elements!"};
+      if (qc_inv_diag.size() == 6)
+        steam_icp_options.qc_inv.diagonal() << qc_inv_diag[0], qc_inv_diag[1], qc_inv_diag[2], qc_inv_diag[3],
+            qc_inv_diag[4], qc_inv_diag[5];
+      LOG(WARNING) << "Parameter " << prefix + "qc_inv_diag"
+                   << " = " << steam_icp_options.qc_inv.diagonal().transpose() << std::endl;
+
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, num_extra_states, int);
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, add_prev_state, bool);
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, num_extra_prev_states, int);
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, lock_prev_pose, bool);
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, lock_prev_vel, bool);
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, prev_pose_as_prior, bool);
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, prev_vel_as_prior, bool);
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, no_prev_state_iters, int);
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, association_after_adding_prev_state, bool);
+
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, use_vp, bool);
+
+      std::vector<double> vp_cov_diag;
+      ROS2_PARAM_NO_LOG(node, vp_cov_diag, prefix, vp_cov_diag, std::vector<double>);
+      if ((vp_cov_diag.size() != 6) && (vp_cov_diag.size() != 0))
+        throw std::invalid_argument{"Velocity prior cov malformed. Must be 6 elements!"};
+      if (vp_cov_diag.size() == 6)
+        steam_icp_options.vp_cov.diagonal() << vp_cov_diag[0], vp_cov_diag[1], vp_cov_diag[2], vp_cov_diag[3],
+            vp_cov_diag[4], vp_cov_diag[5];
+      LOG(WARNING) << "Parameter " << prefix + "vp_cov_diag"
+                   << " = " << steam_icp_options.vp_cov.diagonal().transpose() << std::endl;
+
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, p2p_initial_iters, int);
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, p2p_initial_max_dist, double);
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, p2p_refined_max_dist, double);
+      std::string p2p_loss_func;
+      ROS2_PARAM(node, p2p_loss_func, prefix, p2p_loss_func, std::string);
+      if (p2p_loss_func == "L2")
+        steam_icp_options.p2p_loss_func = SteamOdometry2::STEAM_LOSS_FUNC::L2;
+      else if (p2p_loss_func == "DCS")
+        steam_icp_options.p2p_loss_func = SteamOdometry2::STEAM_LOSS_FUNC::DCS;
+      else if (p2p_loss_func == "CAUCHY")
+        steam_icp_options.p2p_loss_func = SteamOdometry2::STEAM_LOSS_FUNC::CAUCHY;
+      else if (p2p_loss_func == "GM")
+        steam_icp_options.p2p_loss_func = SteamOdometry2::STEAM_LOSS_FUNC::GM;
+      else {
+        LOG(WARNING) << "Parameter " << prefix + "p2p_loss_func"
+                     << " not specified. Using default value: "
+                     << "L2";
+      }
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, p2p_loss_sigma, double);
+
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, use_rv, bool);
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, merge_p2p_rv, bool);
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, rv_cov_inv, double);
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, rv_loss_threshold, double);
+
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, verbose, bool);
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, max_iterations, int);
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, num_threads, int);
+
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, delay_adding_points, bool);
     } else if (options.odometry == "SPLINE") {
       auto &spline_icp_options = dynamic_cast<SplineOdometry::Options &>(odometry_options);
       prefix = "odometry_options.spline.";
@@ -387,6 +464,9 @@ int main(int argc, char **argv) {
   // Get dataset
   const auto dataset = Dataset::Get(options.dataset, options.dataset_options);
 
+  // Error report in case there is ground truth
+  std::vector<Sequence::SeqError> sequence_errors;
+
   while (auto seq = dataset->next()) {
     LOG(WARNING) << "Running odometry on sequence: " << seq->name() << std::endl;
 
@@ -492,7 +572,26 @@ int main(int argc, char **argv) {
       LOG(WARNING) << "Max Local Error : " << seq_error.max_local_err << std::endl;
       LOG(WARNING) << "Index Max Local Error : " << seq_error.index_max_local_err << std::endl;
       LOG(WARNING) << std::endl;
+
+      sequence_errors.emplace_back(seq_error);
     }
+  }
+
+  // error report in case there is ground truth
+  if (sequence_errors.size() > 0) {
+    LOG(WARNING) << std::endl;
+    double all_seq_rpe_t = 0.0;
+    double all_seq_rpe_r = 0.0;
+    double num_total_errors = 0.0;
+    for (const auto &seq_error : sequence_errors) {
+      for (const auto &tab_error : seq_error.tab_errors) {
+        all_seq_rpe_t += tab_error.t_err;
+        all_seq_rpe_r += tab_error.r_err;
+        num_total_errors += 1.0;
+      }
+    }
+    LOG(WARNING) << "KITTI metric translation/rotation : " << (all_seq_rpe_t / num_total_errors) * 100 << " "
+                 << (all_seq_rpe_r / num_total_errors) * 180.0 / M_PI << std::endl;
   }
 
   rclcpp::shutdown();
