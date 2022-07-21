@@ -1,8 +1,6 @@
 #include "steam_icp/odometry/steam_icp.hpp"
 
-#include <chrono>
-#include <fstream>
-#include <iomanip>  // put_time
+#include <iomanip>
 #include <random>
 
 #include <glog/logging.h>
@@ -14,6 +12,51 @@
 namespace steam_icp {
 
 namespace {
+
+/** \brief Basic solver interface */
+class GaussNewtonIterator {
+ public:
+  GaussNewtonIterator(steam::Problem &problem) : problem_(problem), state_vector_(problem.getStateVector()) {}
+
+  /** \brief Perform one iteration */
+  void iterate() {
+    // The 'left-hand-side' of the Gauss-Newton problem, generally known as the
+    // approximate Hessian matrix (note we only store the upper-triangular
+    // elements)
+    Eigen::SparseMatrix<double> approximate_hessian;
+    // The 'right-hand-side' of the Gauss-Newton problem, generally known as the
+    // gradient vector
+    Eigen::VectorXd gradient_vector;
+    // Construct system of equations
+    problem_.buildGaussNewtonTerms(approximate_hessian, gradient_vector);
+    // Solve system
+    // Perform a Cholesky factorization of the approximate Hessian matrix
+    // Check if the pattern has been initialized
+    if (!pattern_initialized_) {
+      hessian_solver_.analyzePattern(approximate_hessian);
+      pattern_initialized_ = true;
+    }
+
+    // Perform a Cholesky factorization of the approximate Hessian matrix
+    hessian_solver_.factorize(approximate_hessian);
+    if (hessian_solver_.info() != Eigen::Success) throw std::runtime_error("Eigen LLT decomposition failed.");
+
+    // Solve
+    Eigen::VectorXd perturbation = hessian_solver_.solve(gradient_vector);
+
+    // Apply update
+    state_vector_.lock()->update(perturbation);
+  }
+
+ private:
+  /** \brief Reference to optimization problem */
+  steam::Problem &problem_;
+  /** \brief Collection of state variables */
+  const steam::StateVector::WeakPtr state_vector_;
+
+  Eigen::SimplicialLLT<Eigen::SparseMatrix<double>, Eigen::Upper> hessian_solver_;
+  bool pattern_initialized_ = false;
+};
 
 inline double AngularDistance(const Eigen::Matrix3d &rota, const Eigen::Matrix3d &rotb) {
   double norm = ((rota * rotb.transpose()).trace() - 1) / 2;
@@ -146,56 +189,46 @@ auto SteamOdometry::registerFrame(const std::vector<Point3D> &const_frame) -> Re
     summary.keypoints = keypoints;
     summary.frame = trajectory_[index_frame];
     if (!summary.success) return summary;
+  } else {
+    using namespace steam;
+    using namespace steam::se3;
+    using namespace steam::vspace;
+    using namespace steam::traj;
 
-    // update frame
-    auto q_begin = Eigen::Quaterniond(trajectory_[index_frame].begin_R);
-    auto q_end = Eigen::Quaterniond(trajectory_[index_frame].end_R);
-    Eigen::Vector3d t_begin = trajectory_[index_frame].begin_t;
-    Eigen::Vector3d t_end = trajectory_[index_frame].end_t;
-    for (auto &point : frame) {
-      // Modifies the world point of the frame based on the raw_pt
-      double alpha_timestamp = point.alpha_timestamp;
-      Eigen::Matrix3d R = q_begin.slerp(alpha_timestamp, q_end).normalized().toRotationMatrix();
-      Eigen::Vector3d t = (1.0 - alpha_timestamp) * t_begin + alpha_timestamp * t_end;
-      //
-      point.pt = R * point.raw_pt + t;
-    }
+    // initial state
+    lgmath::se3::Transformation T_rm;
+    Eigen::Matrix<double, 6, 1> w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
+
+    // iniitalize frame (the beginning of the trajectory)
+    const double begin_time = trajectory_[index_frame].begin_timestamp;
+    Time begin_steam_time(begin_time);
+    const auto begin_T_rm_var = SE3StateVar::MakeShared(T_rm);
+    const auto begin_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(w_mr_inr);
+    trajectory_vars_.emplace_back(begin_steam_time, begin_T_rm_var, begin_w_mr_inr_var);
+
+    // the end of current scan (this is the first state that could be optimized)
+    const double end_time = trajectory_[index_frame].end_timestamp;
+    Time end_steam_time(end_time);
+    const auto end_T_rm_var = SE3StateVar::MakeShared(T_rm);
+    const auto end_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(w_mr_inr);
+    trajectory_vars_.emplace_back(end_steam_time, end_T_rm_var, end_w_mr_inr_var);
+
+    trajectory_[index_frame].end_T_rm_cov = Eigen::Matrix<double, 6, 6>::Identity() * 1e-4;
+    trajectory_[index_frame].end_w_mr_inr_cov = Eigen::Matrix<double, 6, 6>::Identity() * 1e-4;
+    trajectory_[index_frame].end_state_cov = Eigen::Matrix<double, 12, 12>::Identity() * 1e-4;
   }
-  summary.corrected_points = frame;
+  trajectory_[index_frame].points = frame;
 
   // add points
-  const double kSizeVoxelMap = options_.size_voxel_map;
-  const double kMinDistancePoints = options_.min_distance_points;
-  const int kMaxNumPointsInVoxel = options_.max_num_points_in_voxel;
   if (index_frame == 0 || (!options_.delay_adding_points)) {
-    map_.add(frame, kSizeVoxelMap, kMaxNumPointsInVoxel, kMinDistancePoints);
-  } else {
-    trajectory_[index_frame].points = frame;
-    if (index_frame > 1) {
-      // update frame
-      auto q_begin = Eigen::Quaterniond(trajectory_[index_frame - 1].begin_R);
-      auto q_end = Eigen::Quaterniond(trajectory_[index_frame - 1].end_R);
-      Eigen::Vector3d t_begin = trajectory_[index_frame - 1].begin_t;
-      Eigen::Vector3d t_end = trajectory_[index_frame - 1].end_t;
-      auto &prev_frame = trajectory_[index_frame - 1].points;
-      for (auto &point : prev_frame) {
-        // modifies the world point of the frame based on the raw_pt
-        double alpha_timestamp = point.alpha_timestamp;
-        Eigen::Matrix3d R = q_begin.slerp(alpha_timestamp, q_end).normalized().toRotationMatrix();
-        Eigen::Vector3d t = (1.0 - alpha_timestamp) * t_begin + alpha_timestamp * t_end;
-        //
-        point.pt = R * point.raw_pt + t;
-      }
-      map_.add(prev_frame, kSizeVoxelMap, kMaxNumPointsInVoxel, kMinDistancePoints);
-      prev_frame.clear();
-    }
+    updateMap(index_frame, index_frame);
+  } else if (index_frame > 1) {
+    updateMap(index_frame, index_frame - 1);
   }
 
-  // remove points
-  const double kMaxDistance = options_.max_distance;
-  const Eigen::Vector3d location = trajectory_[index_frame].end_t;
-  map_.remove(location, kMaxDistance);
+  summary.corrected_points = frame;
 
+#if false
   // correct all points
   summary.all_corrected_points = const_frame;
   auto q_begin = Eigen::Quaterniond(trajectory_[index_frame].begin_R);
@@ -208,6 +241,7 @@ auto SteamOdometry::registerFrame(const std::vector<Point3D> &const_frame) -> Re
     Eigen::Vector3d t = (1.0 - alpha_timestamp) * t_begin + alpha_timestamp * t_end;
     point.pt = R * point.raw_pt + t;
   }
+#endif
 
   return summary;
 }
@@ -235,10 +269,24 @@ void SteamOdometry::initializeMotion(int index_frame) {
 }
 
 std::vector<Point3D> SteamOdometry::initializeFrame(int index_frame, const std::vector<Point3D> &const_frame) {
-  /// PREPROCESS THE INITIAL FRAME
-  double sample_size = index_frame < options_.init_num_frames ? options_.init_voxel_size : options_.voxel_size;
   std::vector<Point3D> frame(const_frame);
 
+  /// update timestamps
+
+  double min_timestamp = std::numeric_limits<double>::max();
+  double max_timestamp = std::numeric_limits<double>::min();
+  for (auto &point : frame) {
+    point.index_frame = index_frame;
+    if (point.timestamp > max_timestamp) max_timestamp = point.timestamp;
+    if (point.timestamp < min_timestamp) min_timestamp = point.timestamp;
+  }
+
+  trajectory_[index_frame].begin_timestamp = min_timestamp;
+  trajectory_[index_frame].end_timestamp = max_timestamp;
+
+  /// initialize points
+
+  double sample_size = index_frame < options_.init_num_frames ? options_.init_voxel_size : options_.voxel_size;
   std::mt19937_64 g;
   std::shuffle(frame.begin(), frame.end(), g);
   // Subsample the scan with voxels taking one random in every voxel
@@ -259,18 +307,65 @@ std::vector<Point3D> SteamOdometry::initializeFrame(int index_frame, const std::
     }
   }
 
-  double min_timestamp = std::numeric_limits<double>::max();
-  double max_timestamp = std::numeric_limits<double>::min();
-  for (auto &point : frame) {
-    point.index_frame = index_frame;
-    if (point.timestamp > max_timestamp) max_timestamp = point.timestamp;
-    if (point.timestamp < min_timestamp) min_timestamp = point.timestamp;
-  }
-
-  trajectory_[index_frame].begin_timestamp = min_timestamp;
-  trajectory_[index_frame].end_timestamp = max_timestamp;
-
   return frame;
+}
+
+void SteamOdometry::updateMap(int index_frame, int update_frame) {
+  const double kSizeVoxelMap = options_.size_voxel_map;
+  const double kMinDistancePoints = options_.min_distance_points;
+  const int kMaxNumPointsInVoxel = options_.max_num_points_in_voxel;
+
+  // update frame
+  auto &frame = trajectory_[update_frame].points;
+#if false
+  auto q_begin = Eigen::Quaterniond(trajectory_[update_frame].begin_R);
+  auto q_end = Eigen::Quaterniond(trajectory_[update_frame].end_R);
+  Eigen::Vector3d t_begin = trajectory_[update_frame].begin_t;
+  Eigen::Vector3d t_end = trajectory_[update_frame].end_t;
+  for (auto &point : frame) {
+    // modifies the world point of the frame based on the raw_pt
+    double alpha_timestamp = point.alpha_timestamp;
+    Eigen::Matrix3d R = q_begin.slerp(alpha_timestamp, q_end).normalized().toRotationMatrix();
+    Eigen::Vector3d t = (1.0 - alpha_timestamp) * t_begin + alpha_timestamp * t_end;
+    //
+    point.pt = R * point.raw_pt + t;
+  }
+#else
+  using namespace steam::se3;
+  using namespace steam::traj;
+
+  const auto update_trajectory = const_vel::Interface::MakeShared(options_.qc_inv);
+  const auto &prev_var = trajectory_vars_.at(update_frame);
+  update_trajectory->add(prev_var.time, prev_var.T_rm, prev_var.w_mr_inr);
+  const auto &curr_var = trajectory_vars_.at(update_frame + 1);
+  if (curr_var.time != Time(trajectory_[update_frame].end_timestamp))
+    throw std::runtime_error{"current end timestamp mismatch"};
+  update_trajectory->add(curr_var.time, curr_var.T_rm, curr_var.w_mr_inr);
+
+  const auto begin_time = trajectory_[update_frame].begin_timestamp;
+  const auto end_time = trajectory_[update_frame].end_timestamp;
+
+  for (auto &point : frame) {
+    const auto query_time = begin_time + point.alpha_timestamp * (end_time - begin_time);
+
+    const auto T_rm_intp_eval = update_trajectory->getPoseInterpolator(Time(query_time));
+    const auto T_ms_intp_eval = inverse(compose(T_sr_var_, T_rm_intp_eval));
+
+    Eigen::Matrix4d T_ms = T_ms_intp_eval->evaluate().matrix();
+    Eigen::Matrix3d R = T_ms.block<3, 3>(0, 0);
+    Eigen::Vector3d t = T_ms.block<3, 1>(0, 3);
+    //
+    point.pt = R * point.raw_pt + t;
+  }
+#endif
+
+  map_.add(frame, kSizeVoxelMap, kMaxNumPointsInVoxel, kMinDistancePoints);
+  frame.clear();
+
+  // remove points
+  const double kMaxDistance = options_.max_distance;
+  const Eigen::Vector3d location = trajectory_[index_frame].end_t;
+  map_.remove(location, kMaxDistance);
 }
 
 void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, RegistrationSummary &summary) {
@@ -284,47 +379,30 @@ void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regist
   std::vector<StateVarBase::Ptr> steam_state_vars;
   std::vector<BaseCostTerm::ConstPtr> prior_cost_terms;
 
-  auto prev_steam_trajectory = trajectory_[index_frame - 1].steam_traj;
-#if true
-  /// only for debugging
-  const double pprev_time = trajectory_[index_frame - 1].begin_timestamp;
-  Time pprev_steam_time(static_cast<double>(pprev_time));
-  lgmath::se3::Transformation pprev_T_rm;
-  Eigen::Matrix<double, 6, 1> pprev_w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
-  if (prev_steam_trajectory != nullptr) {
-    pprev_T_rm = prev_steam_trajectory->getPoseInterpolator(pprev_steam_time)->evaluate();
-    pprev_w_mr_inr = prev_steam_trajectory->getVelocityInterpolator(pprev_steam_time)->evaluate();
-  }
-#endif
-
   /// use previous trajectory to initialize steam state variables
   LOG(INFO) << "[CT_ICP_STEAM] prev scan end time: " << trajectory_[index_frame - 1].end_timestamp << std::endl;
   const double prev_time = trajectory_[index_frame - 1].end_timestamp;
   Time prev_steam_time(static_cast<double>(prev_time));
-  lgmath::se3::Transformation prev_T_rm;
-  Eigen::Matrix<double, 6, 1> prev_w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
-  Eigen::Matrix<double, 6, 6> prev_T_rm_cov = Eigen::Matrix<double, 6, 6>::Identity() * 1e-4;
-  Eigen::Matrix<double, 6, 6> prev_w_mr_inr_cov = Eigen::Matrix<double, 6, 6>::Identity() * 1e-4;
-  Eigen::Matrix<double, 12, 12> prev_state_cov = Eigen::Matrix<double, 12, 12>::Identity() * 1e-4;
-  if (prev_steam_trajectory != nullptr) {
-    prev_T_rm = prev_steam_trajectory->getPoseInterpolator(prev_steam_time)->evaluate();
-    prev_w_mr_inr = prev_steam_trajectory->getVelocityInterpolator(prev_steam_time)->evaluate();
-    prev_T_rm_cov = trajectory_[index_frame - 1].end_T_rm_cov;
-    prev_w_mr_inr_cov = trajectory_[index_frame - 1].end_w_mr_inr_cov;
-    prev_state_cov = trajectory_[index_frame - 1].end_state_cov;
-  }
-  StateVarBase::Ptr prev_T_rm_var = nullptr;
-  StateVarBase::Ptr prev_w_mr_inr_var = nullptr;
+  if (trajectory_vars_.back().time != prev_steam_time) throw std::runtime_error{"missing previous scan end variable"};
+  lgmath::se3::Transformation prev_T_rm = trajectory_vars_.back().T_rm->value();
+  Eigen::Matrix<double, 6, 1> prev_w_mr_inr = trajectory_vars_.back().w_mr_inr->value();
+  Eigen::Matrix<double, 6, 6> prev_T_rm_cov = trajectory_[index_frame - 1].end_T_rm_cov;
+  Eigen::Matrix<double, 6, 6> prev_w_mr_inr_cov = trajectory_[index_frame - 1].end_w_mr_inr_cov;
+  Eigen::Matrix<double, 12, 12> prev_state_cov = trajectory_[index_frame - 1].end_state_cov;
+  const auto prev_T_rm_var = trajectory_vars_.back().T_rm;
+  const auto prev_w_mr_inr_var = trajectory_vars_.back().w_mr_inr;
+  steam_trajectory->add(prev_steam_time, prev_T_rm_var, prev_w_mr_inr_var);
+  steam_state_vars.emplace_back(prev_T_rm_var);
+  steam_state_vars.emplace_back(prev_w_mr_inr_var);
 
   /// New state for this frame
   LOG(INFO) << "[CT_ICP_STEAM] curr scan end time: " << trajectory_[index_frame].end_timestamp << std::endl;
-  LOG(INFO) << "[CT_ICP_STEAM] total num new states: " << (options_.num_extra_states + 2) << std::endl;
+  LOG(INFO) << "[CT_ICP_STEAM] total num new states: " << (options_.num_extra_states + 1) << std::endl;
   const double curr_time = trajectory_[index_frame].end_timestamp;
-  const int num_states = options_.num_extra_states + 2;
-  const double time_diff = (curr_time - prev_time) / (static_cast<double>(num_states) - 1.0);
+  const int num_states = options_.num_extra_states + 1;
+  const double time_diff = (curr_time - prev_time) / static_cast<double>(num_states);
   std::vector<double> knot_times;
   knot_times.reserve(num_states);
-  knot_times.emplace_back(prev_time);
   for (int i = 0; i < options_.num_extra_states; ++i) {
     knot_times.emplace_back(prev_time + (double)(i + 1) * time_diff);
   }
@@ -350,10 +428,9 @@ void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regist
       const auto loss_func = std::make_shared<L2LossFunc>();
       prior_cost_terms.emplace_back(WeightedLeastSqCostTerm<6>::MakeShared(error_func, noise_model, loss_func));
     }
-    // cache begin state in case it needs to be locked
-    if (i == 0) {
-      prev_T_rm_var = T_rm_var;
-      prev_w_mr_inr_var = w_mr_inr_var;
+    // cache the end state in full steam trajectory because it will be used again
+    if (i == (knot_times.size() - 1)) {
+      trajectory_vars_.emplace_back(knot_steam_time, T_rm_var, w_mr_inr_var);
     }
   }
 
@@ -601,15 +678,6 @@ void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regist
     // Update (changes trajectory data)
     double diff_trans = 0, diff_rot = 0;
 
-    auto &previous_estimate = trajectory_[index_frame - 1];
-    // Time prev_steam_time(static_cast<double>(trajectory[index_frame-1].end_timestamp));  // already defined
-    const auto prev_T_mr = inverse(steam_trajectory->getPoseInterpolator(prev_steam_time))->evaluate().matrix();
-    const auto prev_T_ms = prev_T_mr * options_.T_sr.inverse();
-    previous_estimate.end_R = prev_T_ms.block<3, 3>(0, 0);
-    previous_estimate.end_t = prev_T_ms.block<3, 1>(0, 3);
-
-    previous_estimate.steam_traj = nullptr;  // invalidate prev steam_traj;
-
     auto &current_estimate = trajectory_[index_frame];
 
     Time begin_steam_time(static_cast<double>(trajectory_[index_frame].begin_timestamp));
@@ -627,13 +695,6 @@ void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regist
     diff_rot += AngularDistance(current_estimate.end_R, end_T_ms.block<3, 3>(0, 0));
     current_estimate.end_R = end_T_ms.block<3, 3>(0, 0);
     current_estimate.end_t = end_T_ms.block<3, 1>(0, 3);
-
-    current_estimate.steam_traj = steam_trajectory;
-
-    Eigen::MatrixXd prev_end_state_cov = steam_trajectory->getCovariance(covariance, prev_steam_time);
-    previous_estimate.end_T_rm_cov = prev_end_state_cov.block<6, 6>(0, 0);
-    previous_estimate.end_w_mr_inr_cov = prev_end_state_cov.block<6, 6>(6, 6);
-    previous_estimate.end_state_cov = prev_end_state_cov;
 
     Eigen::MatrixXd curr_end_state_cov = steam_trajectory->getCovariance(covariance, end_steam_time);
     current_estimate.end_T_rm_cov = curr_end_state_cov.block<6, 6>(0, 0);
@@ -674,20 +735,47 @@ void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regist
     if (options_.add_prev_state && ready_to_add_prev_state == 2 && (!options_.association_after_adding_prev_state))
       break;
   }
+  LOG(INFO) << "Number of keypoints used in CT-ICP : " << summary.number_keypoints_used << std::endl;
+
+  /// update trajectory
+  const auto update_trajectory = const_vel::Interface::MakeShared(options_.qc_inv);
+
+  /// add variables
+  const auto &pprev_var = trajectory_vars_.at(index_frame - 1);
+  update_trajectory->add(pprev_var.time, pprev_var.T_rm, pprev_var.w_mr_inr);
+  const auto &prev_var = trajectory_vars_.at(index_frame);
+  update_trajectory->add(prev_var.time, prev_var.T_rm, prev_var.w_mr_inr);
+  const auto &curr_var = trajectory_vars_.at(index_frame + 1);
+  update_trajectory->add(curr_var.time, curr_var.T_rm, curr_var.w_mr_inr);
+
+  /// update previous trajectory states
+  auto &previous_estimate = trajectory_[index_frame - 1];
+
+  Time prev_begin_steam_time(static_cast<double>(previous_estimate.begin_timestamp));  // already defined
+  const auto prev_begin_T_mr =
+      inverse(update_trajectory->getPoseInterpolator(prev_begin_steam_time))->evaluate().matrix();
+  const auto prev_begin_T_ms = prev_begin_T_mr * options_.T_sr.inverse();
+  previous_estimate.begin_R = prev_begin_T_ms.block<3, 3>(0, 0);
+  previous_estimate.begin_t = prev_begin_T_ms.block<3, 1>(0, 3);
+
+  Time prev_end_steam_time(static_cast<double>(previous_estimate.end_timestamp));  // already defined
+  const auto prev_end_T_mr = inverse(update_trajectory->getPoseInterpolator(prev_end_steam_time))->evaluate().matrix();
+  const auto prev_end_T_ms = prev_end_T_mr * options_.T_sr.inverse();
+  previous_estimate.end_R = prev_end_T_ms.block<3, 3>(0, 0);
+  previous_estimate.end_t = prev_end_T_ms.block<3, 1>(0, 3);
 
   /// Debug print
   if (options_.debug_print) {
     const auto debug_trajectory = const_vel::Interface::MakeShared(options_.qc_inv);
-    debug_trajectory->add(pprev_steam_time, SE3StateVar::MakeShared(pprev_T_rm),
-                          VSpaceStateVar<6>::MakeShared(pprev_w_mr_inr));
 
-    const auto debug_prev_T_rm = steam_trajectory->getPoseInterpolator(prev_steam_time)->evaluate();
-    const auto debug_prev_w_mr_inr = steam_trajectory->getVelocityInterpolator(prev_steam_time)->evaluate();
-    debug_trajectory->add(prev_steam_time, SE3StateVar::MakeShared(debug_prev_T_rm),
-                          VSpaceStateVar<6>::MakeShared(debug_prev_w_mr_inr));
+    const auto &pprev_var = trajectory_vars_.at(index_frame - 1);
+    debug_trajectory->add(pprev_var.time, pprev_var.T_rm, pprev_var.w_mr_inr);
 
-    const double begin_timestamp = trajectory_[index_frame - 1].begin_timestamp;
-    const double end_timestamp = trajectory_[index_frame - 1].end_timestamp;
+    const auto &prev_var = trajectory_vars_.at(index_frame);
+    debug_trajectory->add(prev_var.time, prev_var.T_rm, prev_var.w_mr_inr);
+
+    const double begin_timestamp = trajectory_.at(index_frame - 1).begin_timestamp;
+    const double end_timestamp = trajectory_.at(index_frame - 1).end_timestamp;
 
     const int num_states = 10;
     const double time_diff = (end_timestamp - begin_timestamp) / (static_cast<double>(num_states) - 1.0);

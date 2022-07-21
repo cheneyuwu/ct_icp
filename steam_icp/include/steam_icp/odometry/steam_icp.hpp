@@ -2,6 +2,7 @@
 
 #include <fstream>
 
+#include "steam.hpp"
 #include "steam_icp/odometry.hpp"
 
 namespace steam_icp {
@@ -56,6 +57,7 @@ class SteamOdometry : public Odometry {
  private:
   void initializeMotion(int index_frame);
   std::vector<Point3D> initializeFrame(int index_frame, const std::vector<Point3D> &const_frame);
+  void updateMap(int index_frame, int update_frame);
   void icp(int index_frame, std::vector<Point3D> &keypoints, RegistrationSummary &summary);
 
  private:
@@ -63,6 +65,18 @@ class SteamOdometry : public Odometry {
 
   // steam variables
   steam::se3::SE3StateVar::Ptr T_sr_var_ = nullptr;  // robot to sensor transformation as a steam variable
+
+  // trajectory variables
+  struct TrajectoryVar {
+    TrajectoryVar(const steam::traj::Time &t, const steam::se3::SE3StateVar::Ptr &T,
+                  const steam::vspace::VSpaceStateVar<6>::Ptr &w)
+        : time(t), T_rm(T), w_mr_inr(w) {}
+    steam::traj::Time time;
+    steam::se3::SE3StateVar::Ptr T_rm;
+    steam::vspace::VSpaceStateVar<6>::Ptr w_mr_inr;
+  };
+  std::vector<TrajectoryVar> trajectory_vars_;
+  steam::traj::const_vel::Interface::Ptr full_steam_trajectory_ = nullptr;
 
   std::ofstream pose_debug_file_;
   std::ofstream velocity_debug_file_;
