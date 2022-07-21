@@ -391,8 +391,8 @@ void SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints, Regis
   Eigen::Matrix<double, 6, 6> prev_w_mr_inr_cov = trajectory_[index_frame - 1].end_w_mr_inr_cov;
   Eigen::Matrix<double, 12, 12> prev_state_cov = trajectory_[index_frame - 1].end_state_cov;
   // clang-format on
-  const auto prev_T_rm_var = SE3StateVar::MakeShared(prev_T_rm);
-  const auto prev_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(prev_w_mr_inr);
+  const auto prev_T_rm_var = trajectory_vars_.back().T_rm;
+  const auto prev_w_mr_inr_var = trajectory_vars_.back().w_mr_inr;
   steam_trajectory->add(prev_steam_time, prev_T_rm_var, prev_w_mr_inr_var);
   steam_state_vars.emplace_back(prev_T_rm_var);
   steam_state_vars.emplace_back(prev_w_mr_inr_var);
