@@ -159,6 +159,7 @@ SteamOdometry::SteamOdometry(const Options &options) : Odometry(options), option
   auto utc = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
   pose_debug_file_.open(options_.debug_path + "/pose_" + std::to_string(utc) + ".txt", std::ios::out);
   velocity_debug_file_.open(options_.debug_path + "/velocity_" + std::to_string(utc) + ".txt", std::ios::out);
+  state_debug_file_.open(options_.debug_path + "/trajectory.txt", std::ios::out);
 }
 
 auto SteamOdometry::registerFrame(const std::vector<Point3D> &const_frame) -> RegistrationSummary {
@@ -536,16 +537,12 @@ void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regist
       if (innerloop_time) inner_timer[1].second->start();
 
       // Compute normals from neighbors
-      auto neighborhood = compute_neighborhood_distribution(vector_neighbors);
-      double planarity_weight = neighborhood.a2D;
-      auto &normal = neighborhood.normal;
+      const auto neighborhood = compute_neighborhood_distribution(vector_neighbors);
+      const double planarity_weight = neighborhood.a2D;
+      const auto &normal = neighborhood.normal;
 
-      if (normal.dot(trajectory_[index_frame].begin_t - pt_keypoint) < 0) {
-        normal = -1.0 * normal;
-      }
+      const double weight = planarity_weight * planarity_weight;
 
-      double weight = planarity_weight * planarity_weight;  // planarity_weight**2 much better than planarity_weight
-                                                            // (planarity_weight**3 is not working)
       Eigen::Vector3d closest_pt_normal = weight * normal;
 
       Eigen::Vector3d closest_point = vector_neighbors[0];
@@ -553,6 +550,7 @@ void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regist
       double dist_to_plane = normal[0] * (pt_keypoint[0] - closest_point[0]) +
                              normal[1] * (pt_keypoint[1] - closest_point[1]) +
                              normal[2] * (pt_keypoint[2] - closest_point[2]);
+      dist_to_plane = std::abs(dist_to_plane);
 
       if (innerloop_time) inner_timer[1].second->stop();
 
@@ -560,7 +558,7 @@ void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regist
 
       double max_dist_to_plane =
           (iter >= options_.p2p_initial_iters ? options_.p2p_refined_max_dist : options_.p2p_initial_max_dist);
-      bool use_p2p = (fabs(dist_to_plane) < max_dist_to_plane);
+      bool use_p2p = (dist_to_plane < max_dist_to_plane);
       if (use_p2p) {
         /// \note query and reference point
         ///   const auto qry_pt = keypoint.raw_pt;
@@ -785,6 +783,28 @@ void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regist
       const auto w_mr_inr = debug_trajectory->getVelocityInterpolator(Time(qry_time))->evaluate();
       pose_debug_file_ << index_frame << " " << qry_time.nanosecs() << " " << T_rm_vec.transpose() << std::endl;
       velocity_debug_file_ << index_frame << " " << qry_time.nanosecs() << " " << w_mr_inr.transpose() << std::endl;
+    }
+
+    // state debug file
+    if (index_frame == 1) {
+      state_debug_file_ << (index_frame - 1) << " " << Time(begin_timestamp).nanosecs() << " ";
+      state_debug_file_ << 1.0 << " " << 0.0 << " " << 0.0 << " " << 0.0 << " ";
+      state_debug_file_ << 0.0 << " " << 1.0 << " " << 0.0 << " " << 0.0 << " ";
+      state_debug_file_ << 0.0 << " " << 0.0 << " " << 1.0 << " " << 0.0 << " ";
+      state_debug_file_ << 0.0 << " " << 0.0 << " " << 0.0 << " " << 1.0 << " ";
+      state_debug_file_ << 0.0 << " " << 0.0 << " " << 0.0 << " " << 0.0 << " ";
+      state_debug_file_ << 0.0 << " " << 0.0 << std::endl;
+    }
+    {
+      Eigen::Matrix4d T_rm = prev_var.T_rm->value().matrix();
+      Eigen::Matrix<double, 6, 1> w_mr_inr = prev_var.w_mr_inr->value();
+      state_debug_file_ << (index_frame - 1) << " " << Time(end_timestamp).nanosecs() << " ";
+      state_debug_file_ << T_rm(0, 0) << " " << T_rm(0, 1) << " " << T_rm(0, 2) << " " << T_rm(0, 3) << " ";
+      state_debug_file_ << T_rm(1, 0) << " " << T_rm(1, 1) << " " << T_rm(1, 2) << " " << T_rm(1, 3) << " ";
+      state_debug_file_ << T_rm(2, 0) << " " << T_rm(2, 1) << " " << T_rm(2, 2) << " " << T_rm(2, 3) << " ";
+      state_debug_file_ << T_rm(3, 0) << " " << T_rm(3, 1) << " " << T_rm(3, 2) << " " << T_rm(3, 3) << " ";
+      state_debug_file_ << w_mr_inr(0) << " " << w_mr_inr(1) << " " << w_mr_inr(2) << " " << w_mr_inr(3) << " ";
+      state_debug_file_ << w_mr_inr(4) << " " << w_mr_inr(5) << std::endl;
     }
   }
 

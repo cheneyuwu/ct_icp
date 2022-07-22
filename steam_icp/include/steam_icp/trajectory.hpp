@@ -35,7 +35,7 @@ struct TrajectoryFrame {
   Eigen::Matrix3d end_R = Eigen::Matrix3d::Identity();
   Eigen::Vector3d end_t = Eigen::Vector3d::Zero();
 
-  steam::traj::const_vel::Interface::Ptr steam_traj;
+  steam::traj::const_vel::Interface::Ptr steam_traj; // not used anymore
   Eigen::Matrix<double, 6, 6> begin_T_rm_cov = Eigen::Matrix<double, 6, 6>::Identity(); // not used anymore
   Eigen::Matrix<double, 6, 6> begin_w_mr_inr_cov = Eigen::Matrix<double, 6, 6>::Identity(); // not used anymore
   Eigen::Matrix<double, 6, 6> end_T_rm_cov = Eigen::Matrix<double, 6, 6>::Identity();

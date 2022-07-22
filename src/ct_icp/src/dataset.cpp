@@ -2,7 +2,6 @@
 #include <iostream>
 #include <fstream>
 
-
 #include "dataset.hpp"
 #include "Utilities/PlyFile.h"
 #include "io.hpp"

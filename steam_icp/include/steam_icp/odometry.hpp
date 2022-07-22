@@ -57,16 +57,17 @@ class Odometry {
 
   // The Output of a registration, including metrics,
   struct RegistrationSummary {
-    int sample_size = 0;  // The number of points sampled
-
-    bool success = true;  // Whether the registration was a success
-    std::string error_message;
-    int number_keypoints_used = 0;   // The number of keypoints used for ICP registration
-    std::vector<Point3D> keypoints;  // Last Keypoints selected
-
+    std::vector<Point3D> keypoints;             // Last Keypoints selected
     std::vector<Point3D> corrected_points;      // Sampled points expressed in the initial frame
     std::vector<Point3D> all_corrected_points;  // Initial points expressed in the initial frame
+    bool success = true;                        // Whether the registration was a success
+    /// \todo replace frame with a transformation matrix (only for visualization)
     TrajectoryFrame frame;
+
+    /// \todo remove the following entries
+    int sample_size = 0;  // The number of points sampled
+    std::string error_message;
+    int number_keypoints_used = 0;  // The number of keypoints used for ICP registration
   };
   // Registers a new Frame to the Map with an initial estimate
   virtual RegistrationSummary registerFrame(const std::vector<Point3D> &frame) = 0;

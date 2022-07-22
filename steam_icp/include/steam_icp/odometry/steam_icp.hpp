@@ -76,10 +76,10 @@ class SteamOdometry : public Odometry {
     steam::vspace::VSpaceStateVar<6>::Ptr w_mr_inr;
   };
   std::vector<TrajectoryVar> trajectory_vars_;
-  steam::traj::const_vel::Interface::Ptr full_steam_trajectory_ = nullptr;
 
   std::ofstream pose_debug_file_;
   std::ofstream velocity_debug_file_;
+  std::ofstream state_debug_file_;
 
   STEAM_ICP_REGISTER_ODOMETRY("STEAM", SteamOdometry);
 };
