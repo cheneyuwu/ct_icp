@@ -55,10 +55,11 @@ class SteamOdometry2 : public Odometry {
   RegistrationSummary registerFrame(const std::vector<Point3D> &frame) override;
 
  private:
+  void initializeTimestamp(int index_frame, const std::vector<Point3D> &const_frame);
   void initializeMotion(int index_frame);
   std::vector<Point3D> initializeFrame(int index_frame, const std::vector<Point3D> &const_frame);
   void updateMap(int index_frame, int update_frame);
-  void icp(int index_frame, std::vector<Point3D> &keypoints, RegistrationSummary &summary);
+  bool icp(int index_frame, std::vector<Point3D> &keypoints);
 
  private:
   const Options options_;

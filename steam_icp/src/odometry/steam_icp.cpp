@@ -170,6 +170,9 @@ auto SteamOdometry::registerFrame(const std::vector<Point3D> &const_frame) -> Re
   trajectory_.emplace_back();
 
   //
+  initializeTimestamp(index_frame, const_frame);
+
+  //
   initializeMotion(index_frame);
 
   //
@@ -183,12 +186,10 @@ auto SteamOdometry::registerFrame(const std::vector<Point3D> &const_frame) -> Re
     // downsample
     std::vector<Point3D> keypoints;
     grid_sampling(frame, keypoints, sample_voxel_size);
-    summary.sample_size = (int)keypoints.size();
 
     // icp
-    icp(index_frame, keypoints, summary);
+    summary.success = icp(index_frame, keypoints);
     summary.keypoints = keypoints;
-    summary.frame = trajectory_[index_frame];
     if (!summary.success) return summary;
   } else {
     using namespace steam;
@@ -217,6 +218,8 @@ auto SteamOdometry::registerFrame(const std::vector<Point3D> &const_frame) -> Re
     trajectory_[index_frame].end_T_rm_cov = Eigen::Matrix<double, 6, 6>::Identity() * 1e-4;
     trajectory_[index_frame].end_w_mr_inr_cov = Eigen::Matrix<double, 6, 6>::Identity() * 1e-4;
     trajectory_[index_frame].end_state_cov = Eigen::Matrix<double, 12, 12>::Identity() * 1e-4;
+
+    summary.success = true;
   }
   trajectory_[index_frame].points = frame;
 
@@ -244,7 +247,21 @@ auto SteamOdometry::registerFrame(const std::vector<Point3D> &const_frame) -> Re
   }
 #endif
 
+  summary.R_ms = trajectory_[index_frame].end_R;
+  summary.t_ms = trajectory_[index_frame].end_t;
+
   return summary;
+}
+
+void SteamOdometry::initializeTimestamp(int index_frame, const std::vector<Point3D> &const_frame) {
+  double min_timestamp = std::numeric_limits<double>::max();
+  double max_timestamp = std::numeric_limits<double>::min();
+  for (const auto &point : const_frame) {
+    if (point.timestamp > max_timestamp) max_timestamp = point.timestamp;
+    if (point.timestamp < min_timestamp) min_timestamp = point.timestamp;
+  }
+  trajectory_[index_frame].begin_timestamp = min_timestamp;
+  trajectory_[index_frame].end_timestamp = max_timestamp;
 }
 
 void SteamOdometry::initializeMotion(int index_frame) {
@@ -271,22 +288,6 @@ void SteamOdometry::initializeMotion(int index_frame) {
 
 std::vector<Point3D> SteamOdometry::initializeFrame(int index_frame, const std::vector<Point3D> &const_frame) {
   std::vector<Point3D> frame(const_frame);
-
-  /// update timestamps
-
-  double min_timestamp = std::numeric_limits<double>::max();
-  double max_timestamp = std::numeric_limits<double>::min();
-  for (auto &point : frame) {
-    point.index_frame = index_frame;
-    if (point.timestamp > max_timestamp) max_timestamp = point.timestamp;
-    if (point.timestamp < min_timestamp) min_timestamp = point.timestamp;
-  }
-
-  trajectory_[index_frame].begin_timestamp = min_timestamp;
-  trajectory_[index_frame].end_timestamp = max_timestamp;
-
-  /// initialize points
-
   double sample_size = index_frame < options_.init_num_frames ? options_.init_voxel_size : options_.voxel_size;
   std::mt19937_64 g;
   std::shuffle(frame.begin(), frame.end(), g);
@@ -369,11 +370,13 @@ void SteamOdometry::updateMap(int index_frame, int update_frame) {
   map_.remove(location, kMaxDistance);
 }
 
-void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, RegistrationSummary &summary) {
+bool SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
   using namespace steam;
   using namespace steam::se3;
   using namespace steam::traj;
   using namespace steam::vspace;
+
+  bool icp_success = true;
 
   ///
   const auto steam_trajectory = const_vel::Interface::MakeShared(options_.qc_inv);
@@ -643,14 +646,9 @@ void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regist
     timer[0].second->stop();
 
     if (number_keypoints_used < 100) {
-      std::stringstream ss_out;
-      ss_out << "[CT_ICP]Error : not enough keypoints selected in ct-icp !" << std::endl;
-      ss_out << "[CT_ICP]Number_of_residuals : " << number_keypoints_used << std::endl;
-
-      summary.success = false;
-      summary.error_message = ss_out.str();
-      summary.number_keypoints_used = number_keypoints_used;
-
+      LOG(ERROR) << "[CT_ICP]Error : not enough keypoints selected in ct-icp !" << std::endl;
+      LOG(ERROR) << "[CT_ICP]Number_of_residuals : " << number_keypoints_used << std::endl;
+      icp_success = false;
       break;
     }
 
@@ -715,9 +713,6 @@ void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regist
 
     timer[3].second->stop();
 
-    summary.success = true;
-    summary.number_keypoints_used = number_keypoints_used;
-
     if ((index_frame > 1) && iter >= options_.p2p_initial_iters &&
         (diff_rot < options_.threshold_orientation_norm && diff_trans < options_.threshold_translation_norm)) {
       if (options_.debug_print) {
@@ -733,7 +728,7 @@ void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regist
     if (options_.add_prev_state && ready_to_add_prev_state == 2 && (!options_.association_after_adding_prev_state))
       break;
   }
-  LOG(INFO) << "Number of keypoints used in CT-ICP : " << summary.number_keypoints_used << std::endl;
+  LOG(INFO) << "Number of keypoints used in CT-ICP : " << number_keypoints_used << std::endl;
 
   /// update trajectory
   const auto update_trajectory = const_vel::Interface::MakeShared(options_.qc_inv);
@@ -748,19 +743,19 @@ void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regist
 
   /// update previous trajectory states
   auto &previous_estimate = trajectory_[index_frame - 1];
-
-  Time prev_begin_steam_time(static_cast<double>(previous_estimate.begin_timestamp));  // already defined
-  const auto prev_begin_T_mr =
-      inverse(update_trajectory->getPoseInterpolator(prev_begin_steam_time))->evaluate().matrix();
+  // clang-format off
+  Time prev_begin_steam_time(static_cast<double>(previous_estimate.begin_timestamp));
+  const auto prev_begin_T_mr = inverse(update_trajectory->getPoseInterpolator(prev_begin_steam_time))->evaluate().matrix();
   const auto prev_begin_T_ms = prev_begin_T_mr * options_.T_sr.inverse();
   previous_estimate.begin_R = prev_begin_T_ms.block<3, 3>(0, 0);
   previous_estimate.begin_t = prev_begin_T_ms.block<3, 1>(0, 3);
 
-  Time prev_end_steam_time(static_cast<double>(previous_estimate.end_timestamp));  // already defined
+  Time prev_end_steam_time(static_cast<double>(previous_estimate.end_timestamp));
   const auto prev_end_T_mr = inverse(update_trajectory->getPoseInterpolator(prev_end_steam_time))->evaluate().matrix();
   const auto prev_end_T_ms = prev_end_T_mr * options_.T_sr.inverse();
   previous_estimate.end_R = prev_end_T_ms.block<3, 3>(0, 0);
   previous_estimate.end_t = prev_end_T_ms.block<3, 1>(0, 3);
+  // clang-format on
 
   /// Debug print
   if (options_.debug_print) {
@@ -817,6 +812,8 @@ void SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regist
     LOG(INFO) << "Translation Begin: " << trajectory_[index_frame].begin_t.transpose() << std::endl;
     LOG(INFO) << "Translation End: " << trajectory_[index_frame].end_t.transpose() << std::endl;
   }
+
+  return icp_success;
 }
 
 }  // namespace steam_icp

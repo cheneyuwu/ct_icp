@@ -497,8 +497,8 @@ int main(int argc, char **argv) {
       const auto summary = odometry->registerFrame(frame);
       timer[1].second->stop();
       if (!summary.success) {
-        LOG(ERROR) << "Error while running SLAM for sequence " << seq->name() << ", at frame index " << seq->currFrame()
-                   << ". Error Message: " << summary.error_message << std::endl;
+        LOG(ERROR) << "Error running odometry for sequence " << seq->name() << ", at frame index " << seq->currFrame()
+                   << std::endl;
         if (options.suspend_on_failure) return 1;
 
         odometry_success = false;
@@ -508,8 +508,8 @@ int main(int argc, char **argv) {
       timer[2].second->start();
       if (options.visualization_options.odometry) {
         Eigen::Matrix4d T_ws = Eigen::Matrix4d::Identity();
-        T_ws.block<3, 3>(0, 0) = summary.frame.begin_R;
-        T_ws.block<3, 1>(0, 3) = summary.frame.begin_t;
+        T_ws.block<3, 3>(0, 0) = summary.R_ms;
+        T_ws.block<3, 1>(0, 3) = summary.t_ms;
         Eigen::Matrix4d T_wr = T_ws * options.visualization_options.T_sr;
 
         /// odometry

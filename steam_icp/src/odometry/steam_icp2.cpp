@@ -169,6 +169,9 @@ auto SteamOdometry2::registerFrame(const std::vector<Point3D> &const_frame) -> R
   trajectory_.emplace_back();
 
   //
+  initializeTimestamp(index_frame, const_frame);
+
+  //
   initializeMotion(index_frame);
 
   //
@@ -182,12 +185,10 @@ auto SteamOdometry2::registerFrame(const std::vector<Point3D> &const_frame) -> R
     // downsample
     std::vector<Point3D> keypoints;
     grid_sampling(frame, keypoints, sample_voxel_size);
-    summary.sample_size = (int)keypoints.size();
 
     // icp
-    icp(index_frame, keypoints, summary);
+    summary.success = icp(index_frame, keypoints);
     summary.keypoints = keypoints;
-    summary.frame = trajectory_[index_frame];
     if (!summary.success) return summary;
   } else {
     using namespace steam;
@@ -216,6 +217,8 @@ auto SteamOdometry2::registerFrame(const std::vector<Point3D> &const_frame) -> R
     trajectory_[index_frame].end_T_rm_cov = Eigen::Matrix<double, 6, 6>::Identity() * 1e-4;
     trajectory_[index_frame].end_w_mr_inr_cov = Eigen::Matrix<double, 6, 6>::Identity() * 1e-4;
     trajectory_[index_frame].end_state_cov = Eigen::Matrix<double, 12, 12>::Identity() * 1e-4;
+
+    summary.success = true;
   }
   trajectory_[index_frame].points = frame;
 
@@ -243,7 +246,21 @@ auto SteamOdometry2::registerFrame(const std::vector<Point3D> &const_frame) -> R
   }
 #endif
 
+  summary.R_ms = trajectory_[index_frame].end_R;
+  summary.t_ms = trajectory_[index_frame].end_t;
+
   return summary;
+}
+
+void SteamOdometry2::initializeTimestamp(int index_frame, const std::vector<Point3D> &const_frame) {
+  double min_timestamp = std::numeric_limits<double>::max();
+  double max_timestamp = std::numeric_limits<double>::min();
+  for (const auto &point : const_frame) {
+    if (point.timestamp > max_timestamp) max_timestamp = point.timestamp;
+    if (point.timestamp < min_timestamp) min_timestamp = point.timestamp;
+  }
+  trajectory_[index_frame].begin_timestamp = min_timestamp;
+  trajectory_[index_frame].end_timestamp = max_timestamp;
 }
 
 void SteamOdometry2::initializeMotion(int index_frame) {
@@ -270,22 +287,6 @@ void SteamOdometry2::initializeMotion(int index_frame) {
 
 std::vector<Point3D> SteamOdometry2::initializeFrame(int index_frame, const std::vector<Point3D> &const_frame) {
   std::vector<Point3D> frame(const_frame);
-
-  /// update timestamps
-
-  double min_timestamp = std::numeric_limits<double>::max();
-  double max_timestamp = std::numeric_limits<double>::min();
-  for (auto &point : frame) {
-    point.index_frame = index_frame;
-    if (point.timestamp > max_timestamp) max_timestamp = point.timestamp;
-    if (point.timestamp < min_timestamp) min_timestamp = point.timestamp;
-  }
-
-  trajectory_[index_frame].begin_timestamp = min_timestamp;
-  trajectory_[index_frame].end_timestamp = max_timestamp;
-
-  /// initialize points
-
   double sample_size = index_frame < options_.init_num_frames ? options_.init_voxel_size : options_.voxel_size;
   std::mt19937_64 g;
   std::shuffle(frame.begin(), frame.end(), g);
@@ -368,11 +369,13 @@ void SteamOdometry2::updateMap(int index_frame, int update_frame) {
   map_.remove(location, kMaxDistance);
 }
 
-void SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints, RegistrationSummary &summary) {
+bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
   using namespace steam;
   using namespace steam::se3;
   using namespace steam::traj;
   using namespace steam::vspace;
+
+  bool icp_success = true;
 
   ///
   const auto steam_trajectory = const_vel::Interface::MakeShared(options_.qc_inv);
@@ -509,16 +512,12 @@ void SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints, Regis
       if (innerloop_time) inner_timer[1].second->start();
 
       // Compute normals from neighbors
-      auto neighborhood = compute_neighborhood_distribution(vector_neighbors);
-      double planarity_weight = neighborhood.a2D;
-      auto &normal = neighborhood.normal;
+      const auto neighborhood = compute_neighborhood_distribution(vector_neighbors);
+      const double planarity_weight = neighborhood.a2D;
+      const auto &normal = neighborhood.normal;
 
-      if (normal.dot(trajectory_[index_frame].begin_t - pt_keypoint) < 0) {
-        normal = -1.0 * normal;
-      }
+      const double weight = planarity_weight * planarity_weight;
 
-      double weight = planarity_weight * planarity_weight;  // planarity_weight**2 much better than planarity_weight
-                                                            // (planarity_weight**3 is not working)
       Eigen::Vector3d closest_pt_normal = weight * normal;
 
       Eigen::Vector3d closest_point = vector_neighbors[0];
@@ -526,6 +525,7 @@ void SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints, Regis
       double dist_to_plane = normal[0] * (pt_keypoint[0] - closest_point[0]) +
                              normal[1] * (pt_keypoint[1] - closest_point[1]) +
                              normal[2] * (pt_keypoint[2] - closest_point[2]);
+      dist_to_plane = std::abs(dist_to_plane);
 
       if (innerloop_time) inner_timer[1].second->stop();
 
@@ -533,7 +533,7 @@ void SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints, Regis
 
       double max_dist_to_plane =
           (iter >= options_.p2p_initial_iters ? options_.p2p_refined_max_dist : options_.p2p_initial_max_dist);
-      bool use_p2p = (fabs(dist_to_plane) < max_dist_to_plane);
+      bool use_p2p = (dist_to_plane < max_dist_to_plane);
       if (use_p2p) {
         /// \note query and reference point
         ///   const auto qry_pt = keypoint.raw_pt;
@@ -623,14 +623,9 @@ void SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints, Regis
     timer[0].second->stop();
 
     if (number_keypoints_used < 100) {
-      std::stringstream ss_out;
-      ss_out << "[CT_ICP]Error : not enough keypoints selected in ct-icp !" << std::endl;
-      ss_out << "[CT_ICP]Number_of_residuals : " << number_keypoints_used << std::endl;
-
-      summary.success = false;
-      summary.error_message = ss_out.str();
-      summary.number_keypoints_used = number_keypoints_used;
-
+      LOG(ERROR) << "[CT_ICP]Error : not enough keypoints selected in ct-icp !" << std::endl;
+      LOG(ERROR) << "[CT_ICP]Number_of_residuals : " << number_keypoints_used << std::endl;
+      icp_success = false;
       break;
     }
 
@@ -685,9 +680,6 @@ void SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints, Regis
 
     timer[3].second->stop();
 
-    summary.success = true;
-    summary.number_keypoints_used = number_keypoints_used;
-
     if ((index_frame > 1) && iter >= options_.p2p_initial_iters &&
         (diff_rot < options_.threshold_orientation_norm && diff_trans < options_.threshold_translation_norm)) {
       if (options_.debug_print) {
@@ -695,7 +687,7 @@ void SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints, Regis
       }
     }
   }
-  LOG(INFO) << "Number of keypoints used in CT-ICP : " << summary.number_keypoints_used << std::endl;
+  LOG(INFO) << "Number of keypoints used in CT-ICP : " << number_keypoints_used << std::endl;
 
   /// optimize in a sliding window
   LOG(INFO) << "Optimizing in a sliding window!" << std::endl;
@@ -813,6 +805,8 @@ void SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints, Regis
     LOG(INFO) << "Translation Begin: " << trajectory_[index_frame].begin_t.transpose() << std::endl;
     LOG(INFO) << "Translation End: " << trajectory_[index_frame].end_t.transpose() << std::endl;
   }
+
+  return icp_success;
 }
 
 }  // namespace steam_icp

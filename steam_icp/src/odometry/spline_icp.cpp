@@ -66,6 +66,9 @@ auto SplineOdometry::registerFrame(const std::vector<Point3D> &const_frame) -> R
   trajectory_.emplace_back();
 
   //
+  initializeTimestamp(index_frame, const_frame);
+
+  //
   auto frame = initializeFrame(index_frame, const_frame);
 
   double sample_voxel_size =
@@ -74,43 +77,38 @@ auto SplineOdometry::registerFrame(const std::vector<Point3D> &const_frame) -> R
   // downsample
   std::vector<Point3D> keypoints;
   grid_sampling(frame, keypoints, sample_voxel_size);
-  summary.sample_size = (int)keypoints.size();
 
   // icp
-  icp(index_frame, keypoints, summary);
+  summary.success = icp(index_frame, keypoints);
   summary.keypoints = keypoints;
-  summary.frame = trajectory_[index_frame];
-  if (!summary.success) return summary;
 
   return summary;
 }
 
-std::vector<Point3D> SplineOdometry::initializeFrame(int index_frame, const std::vector<Point3D> &const_frame) {
-  /// PREPROCESS THE INITIAL FRAME
-  double sample_size = index_frame < options_.init_num_frames ? options_.init_voxel_size : options_.voxel_size;
-  std::vector<Point3D> frame(const_frame);
+void SplineOdometry::initializeTimestamp(int index_frame, const std::vector<Point3D> &const_frame) {
+  double min_timestamp = std::numeric_limits<double>::max();
+  double max_timestamp = std::numeric_limits<double>::min();
+  for (const auto &point : const_frame) {
+    if (point.timestamp > max_timestamp) max_timestamp = point.timestamp;
+    if (point.timestamp < min_timestamp) min_timestamp = point.timestamp;
+  }
+  trajectory_[index_frame].begin_timestamp = min_timestamp;
+  trajectory_[index_frame].end_timestamp = max_timestamp;
+}
 
+std::vector<Point3D> SplineOdometry::initializeFrame(int index_frame, const std::vector<Point3D> &const_frame) {
+  std::vector<Point3D> frame(const_frame);
+  double sample_size = index_frame < options_.init_num_frames ? options_.init_voxel_size : options_.voxel_size;
   std::mt19937_64 g;
   std::shuffle(frame.begin(), frame.end(), g);
   // Subsample the scan with voxels taking one random in every voxel
   sub_sample_frame(frame, sample_size);
   std::shuffle(frame.begin(), frame.end(), g);
 
-  double min_timestamp = std::numeric_limits<double>::max();
-  double max_timestamp = std::numeric_limits<double>::min();
-  for (auto &point : frame) {
-    point.index_frame = index_frame;
-    if (point.timestamp > max_timestamp) max_timestamp = point.timestamp;
-    if (point.timestamp < min_timestamp) min_timestamp = point.timestamp;
-  }
-
-  trajectory_[index_frame].begin_timestamp = min_timestamp;
-  trajectory_[index_frame].end_timestamp = max_timestamp;
-
   return frame;
 }
 
-void SplineOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, RegistrationSummary &summary) {
+bool SplineOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
   using namespace steam;
   using namespace steam::se3;
   using namespace steam::traj;
@@ -221,6 +219,8 @@ void SplineOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regis
       velocity_query_times_.push_back(query_time);
     }
   }
+
+  return true;
 }
 
 }  // namespace steam_icp
