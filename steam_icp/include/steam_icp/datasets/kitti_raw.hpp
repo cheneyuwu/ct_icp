@@ -9,20 +9,22 @@ class KittiRawSequence : public Sequence {
   KittiRawSequence(const Options& options);
 
   int currFrame() const override { return curr_frame_; }
-  int numFrames() const override { return num_frames_; }
-  bool hasNext() const override { return curr_frame_ < num_frames_; }
+  int numFrames() const override { return last_frame_ - init_frame_; }
+  bool hasNext() const override { return curr_frame_ < last_frame_; }
   std::vector<Point3D> next() override;
 
   void save(const std::string& path, const Trajectory& trajectory) const override;
 
-  bool hasGroundTruth() const override { return true; }
+  bool hasGroundTruth() const override { return has_ground_truth_; }
   SeqError evaluate(const Trajectory& trajectory) const override;
 
  private:
   std::string dir_path_;
   int sequence_id_ = -1;
-  int num_frames_ = -1;
+  int init_frame_ = 0;
   int curr_frame_ = 0;
+  int last_frame_ = std::numeric_limits<int>::max();  // exclusive bound
+  bool has_ground_truth_ = false;
 };
 
 class KittiRawDataset : public Dataset {

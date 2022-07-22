@@ -76,7 +76,8 @@ class SteamOdometry2 : public Odometry {
     steam::vspace::VSpaceStateVar<6>::Ptr w_mr_inr;
   };
   std::vector<TrajectoryVar> trajectory_vars_;
-  steam::traj::const_vel::Interface::Ptr full_steam_trajectory_ = nullptr;
+
+  steam::SlidingWindowFilter sliding_window_filter_;
 
   std::ofstream pose_debug_file_;
   std::ofstream velocity_debug_file_;

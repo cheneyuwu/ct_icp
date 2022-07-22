@@ -155,8 +155,8 @@ steam_icp::SLAMOptions loadOptions(const rclcpp::Node::SharedPtr &node) {
     ROS2_PARAM_CLAUSE(node, dataset_options, prefix, all_sequences, bool);
     ROS2_PARAM_CLAUSE(node, dataset_options, prefix, root_path, std::string);
     ROS2_PARAM_CLAUSE(node, dataset_options, prefix, sequence, std::string);
-    // ROS2_PARAM_CLAUSE(node, options, prefix, start_index, int);
-    // ROS2_PARAM_CLAUSE(node, options, prefix, max_frames, int);
+    ROS2_PARAM_CLAUSE(node, dataset_options, prefix, init_frame, int);
+    ROS2_PARAM_CLAUSE(node, dataset_options, prefix, last_frame, int);
     ROS2_PARAM_CLAUSE(node, dataset_options, prefix, min_dist_lidar_center, float);
     ROS2_PARAM_CLAUSE(node, dataset_options, prefix, max_dist_lidar_center, float);
   }

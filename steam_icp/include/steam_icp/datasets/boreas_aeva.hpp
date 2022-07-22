@@ -9,18 +9,19 @@ class BoreasAevaSequence : public Sequence {
   BoreasAevaSequence(const Options& options);
 
   int currFrame() const override { return curr_frame_; }
-  int numFrames() const override { return num_frames_; }
-  bool hasNext() const override { return curr_frame_ < num_frames_; }
+  int numFrames() const override { return last_frame_ - init_frame_; }
+  bool hasNext() const override { return curr_frame_ < last_frame_; }
   std::vector<Point3D> next() override;
 
-  void save(const std::string &path, const Trajectory &trajectory) const override;
+  void save(const std::string& path, const Trajectory& trajectory) const override;
 
  private:
   std::string dir_path_;
   std::vector<std::string> filenames_;
-  int num_frames_;
   int64_t initial_timestamp_micro_;
+  int init_frame_ = 0;
   int curr_frame_ = 0;
+  int last_frame_ = std::numeric_limits<int>::max();  // exclusive bound
 };
 
 class BoreasAevaDataset : public Dataset {

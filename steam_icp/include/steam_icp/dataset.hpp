@@ -17,10 +17,10 @@ class Sequence {
   struct Options {
     std::string root_path;
     std::string sequence;
-    // int start_index;
-    // int max_frames;
-    double min_dist_lidar_center = 3.0;    // Threshold to filter points too close to the LiDAR center
-    double max_dist_lidar_center = 100.0;  // Threshold to filter points too far to the LiDAR center
+    int init_frame = 0;
+    int last_frame = std::numeric_limits<int>::max();  // exclusive bound
+    double min_dist_lidar_center = 3.0;                // Threshold to filter points too close to the LiDAR center
+    double max_dist_lidar_center = 100.0;              // Threshold to filter points too far to the LiDAR center
   };
 
   Sequence(const Options &options) : options_(options) {}

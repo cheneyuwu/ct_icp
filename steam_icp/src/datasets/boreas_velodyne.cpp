@@ -70,10 +70,13 @@ std::vector<Point3D> readPointCloud(const std::string &path, const double &time_
 BoreasVelodyneSequence::BoreasVelodyneSequence(const Options &options) : Sequence(options) {
   dir_path_ = options_.root_path + "/" + options_.sequence + "/lidar/";
   auto dir_iter = std::filesystem::directory_iterator(dir_path_);
-  num_frames_ = std::count_if(begin(dir_iter), end(dir_iter), [this](auto &entry) {
+  last_frame_ = std::count_if(begin(dir_iter), end(dir_iter), [this](auto &entry) {
     if (entry.is_regular_file()) filenames_.emplace_back(entry.path().filename().string());
     return entry.is_regular_file();
   });
+  last_frame_ = std::min(last_frame_, options_.last_frame);
+  curr_frame_ = std::max((int)0, options_.init_frame);
+  init_frame_ = std::max((int)0, options_.init_frame);
   std::sort(filenames_.begin(), filenames_.end());
   initial_timestamp_micro_ = std::stoll(filenames_[0].substr(0, filenames_[0].find(".")));
 }

@@ -193,9 +193,6 @@ void SplineOdometry::icp(int index_frame, std::vector<Point3D> &keypoints, Regis
   // add variables
   steam_trajectory_->addStateVariables(problem);
 
-  // add prior cost terms
-  steam_trajectory_->addPriorCostTerms(problem);
-
   timer[0].second->stop();
 
   timer[1].second->start();

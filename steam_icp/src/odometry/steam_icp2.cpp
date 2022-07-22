@@ -383,14 +383,9 @@ void SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints, Regis
   LOG(INFO) << "[CT_ICP_STEAM] prev scan end time: " << trajectory_[index_frame - 1].end_timestamp << std::endl;
   const double prev_time = trajectory_[index_frame - 1].end_timestamp;
   Time prev_steam_time(static_cast<double>(prev_time));
-  // clang-format off
   if (trajectory_vars_.back().time != prev_steam_time) throw std::runtime_error{"missing previous scan end variable"};
   lgmath::se3::Transformation prev_T_rm = trajectory_vars_.back().T_rm->value();
   Eigen::Matrix<double, 6, 1> prev_w_mr_inr = trajectory_vars_.back().w_mr_inr->value();
-  Eigen::Matrix<double, 6, 6> prev_T_rm_cov = trajectory_[index_frame - 1].end_T_rm_cov;
-  Eigen::Matrix<double, 6, 6> prev_w_mr_inr_cov = trajectory_[index_frame - 1].end_w_mr_inr_cov;
-  Eigen::Matrix<double, 12, 12> prev_state_cov = trajectory_[index_frame - 1].end_state_cov;
-  // clang-format on
   const auto prev_T_rm_var = trajectory_vars_.back().T_rm;
   const auto prev_w_mr_inr_var = trajectory_vars_.back().w_mr_inr;
   steam_trajectory->add(prev_steam_time, prev_T_rm_var, prev_w_mr_inr_var);
@@ -471,39 +466,12 @@ void SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints, Regis
   inner_timer.emplace_back("Add Cost Term ................ ", std::make_unique<Stopwatch<>>(false));
   bool innerloop_time = (options_.num_threads == 1);
 
+  // cost terms passed to the sliding window filter
+  std::vector<BaseCostTerm::ConstPtr> meas_cost_terms;
+
   //
   int num_iter_icp = index_frame < options_.init_num_frames ? 15 : options_.num_iters_icp;
-  num_iter_icp += options_.no_prev_state_iters;
-  int ready_to_add_prev_state = 0;  // 0=not ready, 1=ready, 2=already added
   for (int iter(0); iter < num_iter_icp; iter++) {
-    if (!options_.add_prev_state) ready_to_add_prev_state = 2;  // assume already added
-    if (iter >= options_.no_prev_state_iters && ready_to_add_prev_state == 0) ready_to_add_prev_state = 1;
-    LOG_IF(INFO, (ready_to_add_prev_state == 1))
-        << "Iteration " << iter << " with ready_to_add_prev_state set to 1" << std::endl;
-
-#if true
-    if (options_.add_prev_state && ready_to_add_prev_state == 1) {
-      if (prev_time < curr_time) {
-        LOG(INFO) << "[CT_ICP_STEAM] The end of last scan < end of current scan with dt=" << std::setprecision(8)
-                  << std::fixed << (curr_time - prev_time) << std::endl;
-        // lock
-        if (options_.lock_prev_pose) prev_T_rm_var->locked() = true;
-        if (options_.lock_prev_vel) prev_w_mr_inr_var->locked() = true;
-        // prior
-        if (options_.prev_pose_as_prior && options_.prev_vel_as_prior)
-          steam_trajectory->addStatePrior(prev_steam_time, prev_T_rm, prev_w_mr_inr, prev_state_cov);
-        else if (options_.prev_pose_as_prior)
-          steam_trajectory->addPosePrior(prev_steam_time, prev_T_rm, prev_T_rm_cov);
-        else if (options_.prev_vel_as_prior)
-          steam_trajectory->addVelocityPrior(prev_steam_time, prev_w_mr_inr, prev_w_mr_inr_cov);
-      } else {
-        LOG(ERROR) << "[CT_ICP_STEAM] The end of last scan > end of current scan with frame=" << index_frame
-                   << ", dt=" << std::setprecision(8) << std::fixed << (curr_time - prev_time) << std::endl;
-        // throw std::runtime_error("[CT_ICP_STEAM] The end of last scan > beginning of current scan - not possible!");
-      }
-      ready_to_add_prev_state = 2;
-    }
-#endif
     number_keypoints_used = 0;
 
     // initialize problem
@@ -517,6 +485,9 @@ void SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints, Regis
     for (const auto &prior_cost_term : prior_cost_terms) problem.addCostTerm(prior_cost_term);
 
     timer[0].second->start();
+
+    meas_cost_terms.clear();
+    meas_cost_terms.reserve(keypoints.size());
 
 #pragma omp parallel for num_threads(options_.num_threads)
     for (int i = 0; i < (int)keypoints.size(); i++) {
@@ -588,6 +559,7 @@ void SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints, Regis
 #pragma omp critical(odometry_cost_term)
           {
             problem.addCostTerm(cost);
+            meas_cost_terms.emplace_back(cost);
 
             number_keypoints_used++;
           }
@@ -620,6 +592,7 @@ void SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints, Regis
 #pragma omp critical(odometry_cost_term)
           {
             problem.addCostTerm(cost);
+            meas_cost_terms.emplace_back(cost);
 
             number_keypoints_used++;
           }
@@ -638,7 +611,10 @@ void SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints, Regis
         const auto cost = WeightedLeastSqCostTerm<1>::MakeShared(error_func, noise_model, loss_func);
 
 #pragma omp critical(odometry_cost_term)
-        { problem.addCostTerm(cost); }
+        {
+          problem.addCostTerm(cost);
+          meas_cost_terms.emplace_back(cost);
+        }
       }
 
       if (innerloop_time) inner_timer[2].second->stop();
@@ -663,12 +639,7 @@ void SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints, Regis
     // Solve
     GaussNewtonSolver::Params params;
     params.verbose = options_.verbose;
-    if (options_.add_prev_state && (ready_to_add_prev_state == 2) && (!options_.association_after_adding_prev_state)) {
-      LOG(INFO) << "Changing maxIteration to 20 due to no re-association." << std::endl;
-      params.max_iterations = 20;
-    } else {
-      params.max_iterations = (unsigned int)options_.max_iterations;
-    }
+    params.max_iterations = (unsigned int)options_.max_iterations;
     GaussNewtonSolver solver(problem, params);
     solver.optimize();
     Covariance covariance(solver);
@@ -698,11 +669,6 @@ void SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints, Regis
     current_estimate.end_R = end_T_ms.block<3, 3>(0, 0);
     current_estimate.end_t = end_T_ms.block<3, 1>(0, 3);
 
-    Eigen::MatrixXd curr_end_state_cov = steam_trajectory->getCovariance(covariance, end_steam_time);
-    current_estimate.end_T_rm_cov = curr_end_state_cov.block<6, 6>(0, 0);
-    current_estimate.end_w_mr_inr_cov = curr_end_state_cov.block<6, 6>(6, 6);
-    current_estimate.end_state_cov = curr_end_state_cov;
-
     timer[2].second->stop();
 
     timer[3].second->start();
@@ -727,15 +693,50 @@ void SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints, Regis
       if (options_.debug_print) {
         LOG(INFO) << "CT_ICP: Finished with N=" << iter << " ICP iterations" << std::endl;
       }
+    }
+  }
+  LOG(INFO) << "Number of keypoints used in CT-ICP : " << summary.number_keypoints_used << std::endl;
 
-      if (ready_to_add_prev_state == 0)
-        ready_to_add_prev_state = 1;
-      else
-        break;
+  /// optimize in a sliding window
+  LOG(INFO) << "Optimizing in a sliding window!" << std::endl;
+  {
+    //
+    if (index_frame == 1) {
+      const auto &prev_var = trajectory_vars_.at(index_frame);
+      sliding_window_filter_.addStateVariable(std::vector<StateVarBase::Ptr>{prev_var.T_rm, prev_var.w_mr_inr});
+
+      /// add a prior to state at this time
+      lgmath::se3::Transformation T_rm;
+      Eigen::Matrix<double, 6, 1> w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
+      Eigen::Matrix<double, 12, 12> state_cov = Eigen::Matrix<double, 12, 12>::Identity() * 1e-4;
+      steam_trajectory->addStatePrior(prev_var.time, T_rm, w_mr_inr, state_cov);
+      if (prev_var.time != Time(trajectory_.at(0).end_timestamp)) throw std::runtime_error{"inconsistent timestamp"};
+    } else {
+      const auto &pprev_var = trajectory_vars_.at(index_frame - 1);
+      sliding_window_filter_.marginalizeVariable(std::vector<StateVarBase::Ptr>{pprev_var.T_rm, pprev_var.w_mr_inr});
     }
 
-    if (options_.add_prev_state && ready_to_add_prev_state == 2 && (!options_.association_after_adding_prev_state))
-      break;
+    //
+    const auto &curr_var = trajectory_vars_.at(index_frame + 1);
+    sliding_window_filter_.addStateVariable(std::vector<StateVarBase::Ptr>{curr_var.T_rm, curr_var.w_mr_inr});
+
+    //
+    steam_trajectory->addPriorCostTerms(sliding_window_filter_);
+    for (const auto &prior_cost_term : prior_cost_terms) sliding_window_filter_.addCostTerm(prior_cost_term);
+    for (const auto &meas_cost_term : meas_cost_terms) sliding_window_filter_.addCostTerm(meas_cost_term);
+
+    //
+    LOG(INFO) << "number of variables: " << sliding_window_filter_.getNumberOfVariables() << std::endl;
+    LOG(INFO) << "number of cost terms: " << sliding_window_filter_.getNumberOfCostTerms() << std::endl;
+    if (sliding_window_filter_.getNumberOfVariables() > 10)
+      throw std::runtime_error{"too many variables in the filter!"};
+    if (sliding_window_filter_.getNumberOfCostTerms() > 10000)
+      throw std::runtime_error{"too many cost terms in the filter!"};
+
+    GaussNewtonSolver::Params params;
+    params.max_iterations = 20;
+    GaussNewtonSolver solver(sliding_window_filter_, params);
+    solver.optimize();
   }
 
   /// update trajectory
@@ -751,19 +752,33 @@ void SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints, Regis
 
   /// update previous trajectory states
   auto &previous_estimate = trajectory_[index_frame - 1];
-
-  Time prev_begin_steam_time(static_cast<double>(previous_estimate.begin_timestamp));  // already defined
-  const auto prev_begin_T_mr =
-      inverse(update_trajectory->getPoseInterpolator(prev_begin_steam_time))->evaluate().matrix();
+  // clang-format off
+  Time prev_begin_steam_time(static_cast<double>(previous_estimate.begin_timestamp));
+  const auto prev_begin_T_mr = inverse(update_trajectory->getPoseInterpolator(prev_begin_steam_time))->evaluate().matrix();
   const auto prev_begin_T_ms = prev_begin_T_mr * options_.T_sr.inverse();
   previous_estimate.begin_R = prev_begin_T_ms.block<3, 3>(0, 0);
   previous_estimate.begin_t = prev_begin_T_ms.block<3, 1>(0, 3);
 
-  Time prev_end_steam_time(static_cast<double>(previous_estimate.end_timestamp));  // already defined
+  Time prev_end_steam_time(static_cast<double>(previous_estimate.end_timestamp));
   const auto prev_end_T_mr = inverse(update_trajectory->getPoseInterpolator(prev_end_steam_time))->evaluate().matrix();
   const auto prev_end_T_ms = prev_end_T_mr * options_.T_sr.inverse();
   previous_estimate.end_R = prev_end_T_ms.block<3, 3>(0, 0);
   previous_estimate.end_t = prev_end_T_ms.block<3, 1>(0, 3);
+
+  auto &current_estimate = trajectory_[index_frame];
+
+  Time curr_begin_steam_time(static_cast<double>(current_estimate.begin_timestamp));
+  const auto curr_begin_T_mr = inverse(update_trajectory->getPoseInterpolator(curr_begin_steam_time))->evaluate().matrix();
+  const auto curr_begin_T_ms = curr_begin_T_mr * options_.T_sr.inverse();
+  current_estimate.begin_R = curr_begin_T_ms.block<3, 3>(0, 0);
+  current_estimate.begin_t = curr_begin_T_ms.block<3, 1>(0, 3);
+
+  Time curr_end_steam_time(static_cast<double>(current_estimate.end_timestamp));
+  const auto curr_end_T_mr = inverse(steam_trajectory->getPoseInterpolator(curr_end_steam_time))->evaluate().matrix();
+  const auto curr_end_T_ms = curr_end_T_mr * options_.T_sr.inverse();
+  current_estimate.end_R = curr_end_T_ms.block<3, 3>(0, 0);
+  current_estimate.end_t = curr_end_T_ms.block<3, 1>(0, 3);
+  // clang-format on
 
   /// Debug print
   if (options_.debug_print) {

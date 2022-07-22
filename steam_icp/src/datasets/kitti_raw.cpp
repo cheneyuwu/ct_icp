@@ -282,7 +282,11 @@ KittiRawSequence::KittiRawSequence(const Options &options) : Sequence(options) {
   if (itr == KITTI_SEQUENCE_NAMES.end()) throw std::runtime_error{"unknow kitti sequence."};
   sequence_id_ = (int)std::distance(KITTI_SEQUENCE_NAMES.begin(), itr);
 
-  num_frames_ = LENGTH_SEQUENCE_KITTI[sequence_id_] + 1;
+  last_frame_ = LENGTH_SEQUENCE_KITTI[sequence_id_] + 1;
+  last_frame_ = std::min(last_frame_, options_.last_frame);
+  curr_frame_ = std::max((int)0, options_.init_frame);
+  init_frame_ = std::max((int)0, options_.init_frame);
+  has_ground_truth_ = ((init_frame_ == 0) && last_frame_ == (LENGTH_SEQUENCE_KITTI[sequence_id_] + 1));
 }
 
 std::vector<Point3D> KittiRawSequence::next() {
