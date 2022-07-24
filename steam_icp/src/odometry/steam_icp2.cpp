@@ -294,18 +294,16 @@ std::vector<Point3D> SteamOdometry2::initializeFrame(int index_frame, const std:
   sub_sample_frame(frame, sample_size);
   std::shuffle(frame.begin(), frame.end(), g);
 
-  if (index_frame > 1) {
-    auto q_begin = Eigen::Quaterniond(trajectory_[index_frame].begin_R);
-    auto q_end = Eigen::Quaterniond(trajectory_[index_frame].end_R);
-    Eigen::Vector3d t_begin = trajectory_[index_frame].begin_t;
-    Eigen::Vector3d t_end = trajectory_[index_frame].end_t;
-    for (auto &point : frame) {
-      double alpha_timestamp = point.alpha_timestamp;
-      Eigen::Matrix3d R = q_begin.slerp(alpha_timestamp, q_end).normalized().toRotationMatrix();
-      Eigen::Vector3d t = (1.0 - alpha_timestamp) * t_begin + alpha_timestamp * t_end;
-      //
-      point.pt = R * point.raw_pt + t;
-    }
+  auto q_begin = Eigen::Quaterniond(trajectory_[index_frame].begin_R);
+  auto q_end = Eigen::Quaterniond(trajectory_[index_frame].end_R);
+  Eigen::Vector3d t_begin = trajectory_[index_frame].begin_t;
+  Eigen::Vector3d t_end = trajectory_[index_frame].end_t;
+  for (auto &point : frame) {
+    double alpha_timestamp = point.alpha_timestamp;
+    Eigen::Matrix3d R = q_begin.slerp(alpha_timestamp, q_end).normalized().toRotationMatrix();
+    Eigen::Vector3d t = (1.0 - alpha_timestamp) * t_begin + alpha_timestamp * t_end;
+    //
+    point.pt = R * point.raw_pt + t;
   }
 
   return frame;
@@ -343,11 +341,8 @@ void SteamOdometry2::updateMap(int index_frame, int update_frame) {
     throw std::runtime_error{"current end timestamp mismatch"};
   update_trajectory->add(curr_var.time, curr_var.T_rm, curr_var.w_mr_inr);
 
-  const auto begin_time = trajectory_[update_frame].begin_timestamp;
-  const auto end_time = trajectory_[update_frame].end_timestamp;
-
   for (auto &point : frame) {
-    const auto query_time = begin_time + point.alpha_timestamp * (end_time - begin_time);
+    const double query_time = point.timestamp;
 
     const auto T_rm_intp_eval = update_trajectory->getPoseInterpolator(Time(query_time));
     const auto T_ms_intp_eval = inverse(compose(T_sr_var_, T_rm_intp_eval));
@@ -439,9 +434,7 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
   std::vector<Evaluable<const_vel::Interface::VelocityType>::ConstPtr> w_ms_ins_intp_eval_vec;
   T_ms_intp_eval_vec.reserve(keypoints.size());
   for (const auto &keypoint : keypoints) {
-    const auto query_time =
-        trajectory_[index_frame].begin_timestamp +
-        keypoint.alpha_timestamp * (trajectory_[index_frame].end_timestamp - trajectory_[index_frame].begin_timestamp);
+    const double query_time = keypoint.timestamp;
     // pose
     const auto T_rm_intp_eval = steam_trajectory->getPoseInterpolator(Time(query_time));
     const auto T_ms_intp_eval = inverse(compose(T_sr_var_, T_rm_intp_eval));
