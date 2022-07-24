@@ -22,6 +22,12 @@ class BoreasAevaSequence : public Sequence {
   int init_frame_ = 0;
   int curr_frame_ = 0;
   int last_frame_ = std::numeric_limits<int>::max();  // exclusive bound
+
+  // velocity calibration parameters
+  Eigen::MatrixXd rt_parts_;
+  std::vector<Eigen::MatrixXd> azi_ranges_;
+  std::vector<Eigen::MatrixXd> vel_means_;
+  bool has_beam_id_ = false;
 };
 
 class BoreasAevaDataset : public Dataset {
@@ -51,7 +57,7 @@ class BoreasAevaDataset : public Dataset {
       "boreas-2022-05-13-10-30",  // marc santi
       "boreas-2022-05-13-11-47",  // glen shields
       "boreas-2022-05-18-17-23",  // cocksfield
-      "boreas-2022-07-08-15-55",  // debug (static)
+      "boreas-2022-07-19-15-52",  // debug (static, with beam id)
   };
 
   STEAM_ICP_REGISTER_DATASET("AEVA", BoreasAevaDataset);

@@ -11,6 +11,7 @@ struct Point3D {
   double radial_velocity = 0.0;  // Radial velocity of the point
   double alpha_timestamp = 0.0;  // Relative timestamp in the frame in [0.0, 1.0]
   double timestamp = 0.0;        // The absolute timestamp (if applicable)
+  int beam_id = -1;              // The beam id of the point
 };
 
 }  // namespace steam_icp

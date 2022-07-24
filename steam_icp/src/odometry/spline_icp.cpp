@@ -13,12 +13,6 @@ namespace steam_icp {
 
 namespace {
 
-inline double AngularDistance(const Eigen::Matrix3d &rota, const Eigen::Matrix3d &rotb) {
-  double norm = ((rota * rotb.transpose()).trace() - 1) / 2;
-  norm = std::acos(norm) * 180 / M_PI;
-  return norm;
-}
-
 /* -------------------------------------------------------------------------------------------------------------- */
 // Subsample to keep one random point in every voxel of the current frame
 void sub_sample_frame(std::vector<Point3D> &frame, double size_voxel) {

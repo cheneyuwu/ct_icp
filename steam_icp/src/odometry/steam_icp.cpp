@@ -500,7 +500,7 @@ bool SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
   std::vector<Evaluable<const_vel::Interface::VelocityType>::ConstPtr> w_ms_ins_intp_eval_vec;
   T_ms_intp_eval_vec.reserve(keypoints.size());
   for (const auto &keypoint : keypoints) {
-    const auto query_time = keypoint.timestamp;
+    const double query_time = keypoint.timestamp;
     // pose
     const auto T_rm_intp_eval = steam_trajectory->getPoseInterpolator(Time(query_time));
     const auto T_ms_intp_eval = inverse(compose(T_sr_var_, T_rm_intp_eval));
