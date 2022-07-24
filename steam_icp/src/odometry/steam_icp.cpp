@@ -154,12 +154,69 @@ SteamOdometry::SteamOdometry(const Options &options) : Odometry(options), option
   // iniitalize steam vars
   T_sr_var_ = steam::se3::SE3StateVar::MakeShared(lgmath::se3::Transformation(options_.T_sr));
   T_sr_var_->locked() = true;
+}
 
+SteamOdometry::~SteamOdometry() {
+  using namespace steam::traj;
+
+  std::ofstream trajectory_file;
   auto now = std::chrono::system_clock::now();
   auto utc = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
-  pose_debug_file_.open(options_.debug_path + "/pose_" + std::to_string(utc) + ".txt", std::ios::out);
-  velocity_debug_file_.open(options_.debug_path + "/velocity_" + std::to_string(utc) + ".txt", std::ios::out);
-  state_debug_file_.open(options_.debug_path + "/trajectory.txt", std::ios::out);
+  trajectory_file.open(options_.debug_path + "/trajectory_" + std::to_string(utc) + ".txt", std::ios::out);
+  // trajectory_file.open(options_.debug_path + "/trajectory.txt", std::ios::out);
+
+  LOG(INFO) << "Building full trajectory." << std::endl;
+  auto full_trajectory = steam::traj::const_vel::Interface::MakeShared(options_.qc_inv);
+  for (auto &var : trajectory_vars_) {
+    full_trajectory->add(var.time, var.T_rm, var.w_mr_inr);
+  }
+
+  LOG(INFO) << "Dumping trajectory." << std::endl;
+  double begin_time = trajectory_.front().begin_timestamp;
+  double end_time = trajectory_.back().end_timestamp;
+  double dt = 0.01;
+  for (double time = begin_time; time <= end_time; time += dt) {
+    Time steam_time(time);
+    //
+    const auto T_rm = full_trajectory->getPoseInterpolator(steam_time)->evaluate().matrix();
+    const auto w_mr_inr = full_trajectory->getVelocityInterpolator(steam_time)->evaluate();
+    //
+    trajectory_file << (0.0) << " " << steam_time.nanosecs() << " ";
+    trajectory_file << T_rm(0, 0) << " " << T_rm(0, 1) << " " << T_rm(0, 2) << " " << T_rm(0, 3) << " ";
+    trajectory_file << T_rm(1, 0) << " " << T_rm(1, 1) << " " << T_rm(1, 2) << " " << T_rm(1, 3) << " ";
+    trajectory_file << T_rm(2, 0) << " " << T_rm(2, 1) << " " << T_rm(2, 2) << " " << T_rm(2, 3) << " ";
+    trajectory_file << T_rm(3, 0) << " " << T_rm(3, 1) << " " << T_rm(3, 2) << " " << T_rm(3, 3) << " ";
+    trajectory_file << w_mr_inr(0) << " " << w_mr_inr(1) << " " << w_mr_inr(2) << " " << w_mr_inr(3) << " ";
+    trajectory_file << w_mr_inr(4) << " " << w_mr_inr(5) << std::endl;
+  }
+  LOG(INFO) << "Dumping trajectory. - DONE" << std::endl;
+}
+
+Trajectory SteamOdometry::trajectory() {
+  LOG(INFO) << "Building full trajectory." << std::endl;
+  auto full_trajectory = steam::traj::const_vel::Interface::MakeShared(options_.qc_inv);
+  for (auto &var : trajectory_vars_) {
+    full_trajectory->add(var.time, var.T_rm, var.w_mr_inr);
+  }
+
+  LOG(INFO) << "Updating trajectory." << std::endl;
+  using namespace steam::se3;
+  using namespace steam::traj;
+  for (auto &frame : trajectory_) {
+    Time begin_steam_time(frame.begin_timestamp);
+    const auto begin_T_mr = inverse(full_trajectory->getPoseInterpolator(begin_steam_time))->evaluate().matrix();
+    const auto begin_T_ms = begin_T_mr * options_.T_sr.inverse();
+    frame.begin_R = begin_T_ms.block<3, 3>(0, 0);
+    frame.begin_t = begin_T_ms.block<3, 1>(0, 3);
+
+    Time end_steam_time(frame.end_timestamp);
+    const auto end_T_mr = inverse(full_trajectory->getPoseInterpolator(end_steam_time))->evaluate().matrix();
+    const auto end_T_ms = end_T_mr * options_.T_sr.inverse();
+    frame.end_R = end_T_ms.block<3, 3>(0, 0);
+    frame.end_t = end_T_ms.block<3, 1>(0, 3);
+  }
+
+  return trajectory_;
 }
 
 auto SteamOdometry::registerFrame(const std::vector<Point3D> &const_frame) -> RegistrationSummary {
@@ -201,7 +258,7 @@ auto SteamOdometry::registerFrame(const std::vector<Point3D> &const_frame) -> Re
     lgmath::se3::Transformation T_rm;
     Eigen::Matrix<double, 6, 1> w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
 
-    // iniitalize frame (the beginning of the trajectory)
+    // initialize frame (the beginning of the trajectory)
     const double begin_time = trajectory_[index_frame].begin_timestamp;
     Time begin_steam_time(begin_time);
     const auto begin_T_rm_var = SE3StateVar::MakeShared(T_rm);
@@ -224,7 +281,7 @@ auto SteamOdometry::registerFrame(const std::vector<Point3D> &const_frame) -> Re
   trajectory_[index_frame].points = frame;
 
   // add points
-  if (index_frame == 0 || (!options_.delay_adding_points)) {
+  if (index_frame == 0 || (options_.delay_adding_points == 0)) {
     updateMap(index_frame, index_frame);
   } else if (index_frame > 1) {
     updateMap(index_frame, index_frame - 1);
@@ -339,6 +396,9 @@ void SteamOdometry::updateMap(int index_frame, int update_frame) {
   const auto &prev_var = trajectory_vars_.at(update_frame);
   update_trajectory->add(prev_var.time, prev_var.T_rm, prev_var.w_mr_inr);
   const auto &curr_var = trajectory_vars_.at(update_frame + 1);
+  if ((prev_var.time != Time(trajectory_[update_frame - 1].end_timestamp)) &&
+      (prev_var.time != Time(trajectory_[update_frame].begin_timestamp)))
+    throw std::runtime_error{"previous end timestamp mismatch"};
   if (curr_var.time != Time(trajectory_[update_frame].end_timestamp))
     throw std::runtime_error{"current end timestamp mismatch"};
   update_trajectory->add(curr_var.time, curr_var.T_rm, curr_var.w_mr_inr);
@@ -382,8 +442,9 @@ bool SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
   /// use previous trajectory to initialize steam state variables
   LOG(INFO) << "[CT_ICP_STEAM] prev scan end time: " << trajectory_[index_frame - 1].end_timestamp << std::endl;
   const double prev_time = trajectory_[index_frame - 1].end_timestamp;
-  Time prev_steam_time(static_cast<double>(prev_time));
-  if (trajectory_vars_.back().time != prev_steam_time) throw std::runtime_error{"missing previous scan end variable"};
+  if (trajectory_vars_.back().time != Time(static_cast<double>(prev_time)))
+    throw std::runtime_error{"missing previous scan end variable"};
+  Time prev_steam_time = trajectory_vars_.back().time;
   lgmath::se3::Transformation prev_T_rm = trajectory_vars_.back().T_rm->value();
   Eigen::Matrix<double, 6, 1> prev_w_mr_inr = trajectory_vars_.back().w_mr_inr->value();
   Eigen::Matrix<double, 6, 6> prev_T_rm_cov = trajectory_[index_frame - 1].end_T_rm_cov;
@@ -724,79 +785,7 @@ bool SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
   }
   LOG(INFO) << "Number of keypoints used in CT-ICP : " << number_keypoints_used << std::endl;
 
-  /// update trajectory
-  const auto update_trajectory = const_vel::Interface::MakeShared(options_.qc_inv);
-
-  /// add variables
-  const auto &pprev_var = trajectory_vars_.at(index_frame - 1);
-  update_trajectory->add(pprev_var.time, pprev_var.T_rm, pprev_var.w_mr_inr);
-  const auto &prev_var = trajectory_vars_.at(index_frame);
-  update_trajectory->add(prev_var.time, prev_var.T_rm, prev_var.w_mr_inr);
-  const auto &curr_var = trajectory_vars_.at(index_frame + 1);
-  update_trajectory->add(curr_var.time, curr_var.T_rm, curr_var.w_mr_inr);
-
-  /// update previous trajectory states
-  auto &previous_estimate = trajectory_[index_frame - 1];
-  // clang-format off
-  Time prev_begin_steam_time(static_cast<double>(previous_estimate.begin_timestamp));
-  const auto prev_begin_T_mr = inverse(update_trajectory->getPoseInterpolator(prev_begin_steam_time))->evaluate().matrix();
-  const auto prev_begin_T_ms = prev_begin_T_mr * options_.T_sr.inverse();
-  previous_estimate.begin_R = prev_begin_T_ms.block<3, 3>(0, 0);
-  previous_estimate.begin_t = prev_begin_T_ms.block<3, 1>(0, 3);
-
-  Time prev_end_steam_time(static_cast<double>(previous_estimate.end_timestamp));
-  const auto prev_end_T_mr = inverse(update_trajectory->getPoseInterpolator(prev_end_steam_time))->evaluate().matrix();
-  const auto prev_end_T_ms = prev_end_T_mr * options_.T_sr.inverse();
-  previous_estimate.end_R = prev_end_T_ms.block<3, 3>(0, 0);
-  previous_estimate.end_t = prev_end_T_ms.block<3, 1>(0, 3);
-  // clang-format on
-
   /// Debug print
-  if (options_.debug_print) {
-    const auto debug_trajectory = const_vel::Interface::MakeShared(options_.qc_inv);
-
-    const auto &pprev_var = trajectory_vars_.at(index_frame - 1);
-    debug_trajectory->add(pprev_var.time, pprev_var.T_rm, pprev_var.w_mr_inr);
-
-    const auto &prev_var = trajectory_vars_.at(index_frame);
-    debug_trajectory->add(prev_var.time, prev_var.T_rm, prev_var.w_mr_inr);
-
-    const double begin_timestamp = trajectory_.at(index_frame - 1).begin_timestamp;
-    const double end_timestamp = trajectory_.at(index_frame - 1).end_timestamp;
-
-    const int num_states = 10;
-    const double time_diff = (end_timestamp - begin_timestamp) / (static_cast<double>(num_states) - 1.0);
-    for (int i = 0; i < num_states; ++i) {
-      Time qry_time(static_cast<double>(begin_timestamp + i * time_diff));
-      const auto T_rm_vec = debug_trajectory->getPoseInterpolator(Time(qry_time))->evaluate().vec();
-      const auto w_mr_inr = debug_trajectory->getVelocityInterpolator(Time(qry_time))->evaluate();
-      pose_debug_file_ << index_frame << " " << qry_time.nanosecs() << " " << T_rm_vec.transpose() << std::endl;
-      velocity_debug_file_ << index_frame << " " << qry_time.nanosecs() << " " << w_mr_inr.transpose() << std::endl;
-    }
-
-    // state debug file
-    if (index_frame == 1) {
-      state_debug_file_ << (index_frame - 1) << " " << Time(begin_timestamp).nanosecs() << " ";
-      state_debug_file_ << 1.0 << " " << 0.0 << " " << 0.0 << " " << 0.0 << " ";
-      state_debug_file_ << 0.0 << " " << 1.0 << " " << 0.0 << " " << 0.0 << " ";
-      state_debug_file_ << 0.0 << " " << 0.0 << " " << 1.0 << " " << 0.0 << " ";
-      state_debug_file_ << 0.0 << " " << 0.0 << " " << 0.0 << " " << 1.0 << " ";
-      state_debug_file_ << 0.0 << " " << 0.0 << " " << 0.0 << " " << 0.0 << " ";
-      state_debug_file_ << 0.0 << " " << 0.0 << std::endl;
-    }
-    {
-      Eigen::Matrix4d T_rm = prev_var.T_rm->value().matrix();
-      Eigen::Matrix<double, 6, 1> w_mr_inr = prev_var.w_mr_inr->value();
-      state_debug_file_ << (index_frame - 1) << " " << Time(end_timestamp).nanosecs() << " ";
-      state_debug_file_ << T_rm(0, 0) << " " << T_rm(0, 1) << " " << T_rm(0, 2) << " " << T_rm(0, 3) << " ";
-      state_debug_file_ << T_rm(1, 0) << " " << T_rm(1, 1) << " " << T_rm(1, 2) << " " << T_rm(1, 3) << " ";
-      state_debug_file_ << T_rm(2, 0) << " " << T_rm(2, 1) << " " << T_rm(2, 2) << " " << T_rm(2, 3) << " ";
-      state_debug_file_ << T_rm(3, 0) << " " << T_rm(3, 1) << " " << T_rm(3, 2) << " " << T_rm(3, 3) << " ";
-      state_debug_file_ << w_mr_inr(0) << " " << w_mr_inr(1) << " " << w_mr_inr(2) << " " << w_mr_inr(3) << " ";
-      state_debug_file_ << w_mr_inr(4) << " " << w_mr_inr(5) << std::endl;
-    }
-  }
-
   if (options_.debug_print) {
     for (size_t i = 0; i < timer.size(); i++)
       LOG(INFO) << "Elapsed " << timer[i].first << *(timer[i].second) << std::endl;

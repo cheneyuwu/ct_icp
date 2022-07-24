@@ -49,7 +49,8 @@ class Odometry {
   virtual ~Odometry() = default;
 
   // trajectory
-  Trajectory trajectory() const { return trajectory_; }
+  // virtual Trajectory trajectory() { return trajectory_; }
+  virtual Trajectory trajectory() = 0;
 
   // map
   size_t size() const { return map_.size(); }

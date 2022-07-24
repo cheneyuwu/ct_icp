@@ -272,7 +272,7 @@ steam_icp::SLAMOptions loadOptions(const rclcpp::Node::SharedPtr &node) {
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, max_iterations, int);
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, num_threads, int);
 
-      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, delay_adding_points, bool);
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, delay_adding_points, int);
     } else if (options.odometry == "STEAM2") {
       auto &steam_icp_options = dynamic_cast<SteamOdometry2::Options &>(odometry_options);
       prefix = "odometry_options.steam.";
@@ -348,7 +348,7 @@ steam_icp::SLAMOptions loadOptions(const rclcpp::Node::SharedPtr &node) {
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, max_iterations, int);
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, num_threads, int);
 
-      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, delay_adding_points, bool);
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, delay_adding_points, int);
     } else if (options.odometry == "SPLINE") {
       auto &spline_icp_options = dynamic_cast<SplineOdometry::Options &>(odometry_options);
       prefix = "odometry_options.spline.";

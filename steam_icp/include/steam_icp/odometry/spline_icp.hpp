@@ -41,6 +41,8 @@ class SplineOdometry : public Odometry {
     velocity_debug_file_.close();
   }
 
+  Trajectory trajectory() override { return trajectory_; }
+
   RegistrationSummary registerFrame(const std::vector<Point3D> &frame) override;
 
  private:

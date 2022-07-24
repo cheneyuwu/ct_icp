@@ -47,10 +47,13 @@ class SteamOdometry2 : public Odometry {
     unsigned int num_threads = 1;
 
     //
-    bool delay_adding_points = false;
+    int delay_adding_points = 1;
   };
 
   SteamOdometry2(const Options &options);
+  ~SteamOdometry2();
+
+  Trajectory trajectory() override;
 
   RegistrationSummary registerFrame(const std::vector<Point3D> &frame) override;
 
@@ -78,10 +81,7 @@ class SteamOdometry2 : public Odometry {
   };
   std::vector<TrajectoryVar> trajectory_vars_;
 
-  steam::SlidingWindowFilter sliding_window_filter_;
-
-  std::ofstream pose_debug_file_;
-  std::ofstream velocity_debug_file_;
+  steam::SlidingWindowFilter::Ptr sliding_window_filter_;
 
   STEAM_ICP_REGISTER_ODOMETRY("STEAM2", SteamOdometry2);
 };

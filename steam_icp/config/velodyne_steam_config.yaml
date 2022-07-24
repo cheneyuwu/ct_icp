@@ -77,4 +77,4 @@
         max_iterations: 5
         num_threads: 10
 
-        delay_adding_points: true
+        delay_adding_points: 1
