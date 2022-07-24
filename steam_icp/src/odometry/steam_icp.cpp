@@ -438,6 +438,7 @@ bool SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
   const auto steam_trajectory = const_vel::Interface::MakeShared(options_.qc_inv);
   std::vector<StateVarBase::Ptr> steam_state_vars;
   std::vector<BaseCostTerm::ConstPtr> prior_cost_terms;
+  std::vector<BaseCostTerm::ConstPtr> meas_cost_terms;
 
   /// use previous trajectory to initialize steam state variables
   LOG(INFO) << "[CT_ICP_STEAM] prev scan end time: " << trajectory_[index_frame - 1].end_timestamp << std::endl;
@@ -575,6 +576,9 @@ bool SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
 
     timer[0].second->start();
 
+    meas_cost_terms.clear();
+    meas_cost_terms.reserve(keypoints.size());
+
 #pragma omp parallel for num_threads(options_.num_threads)
     for (int i = 0; i < (int)keypoints.size(); i++) {
       const auto &keypoint = keypoints[i];
@@ -641,8 +645,7 @@ bool SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
 
 #pragma omp critical(odometry_cost_term)
           {
-            problem.addCostTerm(cost);
-
+            meas_cost_terms.emplace_back(cost);
             number_keypoints_used++;
           }
 
@@ -673,8 +676,7 @@ bool SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
 
 #pragma omp critical(odometry_cost_term)
           {
-            problem.addCostTerm(cost);
-
+            meas_cost_terms.emplace_back(cost);
             number_keypoints_used++;
           }
         }
@@ -692,11 +694,13 @@ bool SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
         const auto cost = WeightedLeastSqCostTerm<1>::MakeShared(error_func, noise_model, loss_func);
 
 #pragma omp critical(odometry_cost_term)
-        { problem.addCostTerm(cost); }
+        { meas_cost_terms.emplace_back(cost); }
       }
 
       if (innerloop_time) inner_timer[2].second->stop();
     }
+
+    for (const auto &cost : meas_cost_terms) problem.addCostTerm(cost);
 
     timer[0].second->stop();
 

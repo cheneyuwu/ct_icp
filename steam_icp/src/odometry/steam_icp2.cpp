@@ -354,6 +354,7 @@ std::vector<Point3D> SteamOdometry2::initializeFrame(int index_frame, const std:
   sub_sample_frame(frame, sample_size);
   std::shuffle(frame.begin(), frame.end(), g);
 
+  // initialize points
   auto q_begin = Eigen::Quaterniond(trajectory_[index_frame].begin_R);
   auto q_end = Eigen::Quaterniond(trajectory_[index_frame].end_R);
   Eigen::Vector3d t_begin = trajectory_[index_frame].begin_t;
@@ -439,6 +440,7 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
   const auto steam_trajectory = const_vel::Interface::MakeShared(options_.qc_inv);
   std::vector<StateVarBase::Ptr> steam_state_vars;
   std::vector<BaseCostTerm::ConstPtr> prior_cost_terms;
+  std::vector<BaseCostTerm::ConstPtr> meas_cost_terms;
 
   /// use previous trajectory to initialize steam state variables
   LOG(INFO) << "[CT_ICP_STEAM] prev scan end time: " << trajectory_[index_frame - 1].end_timestamp << std::endl;
@@ -493,6 +495,34 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
     }
   }
 
+  if (index_frame == 1) {
+    const auto &prev_var = trajectory_vars_.at(index_frame);
+    /// add a prior to state at the beginning
+    lgmath::se3::Transformation T_rm;
+    Eigen::Matrix<double, 6, 1> w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
+    Eigen::Matrix<double, 12, 12> state_cov = Eigen::Matrix<double, 12, 12>::Identity() * 1e-4;
+    steam_trajectory->addStatePrior(prev_var.time, T_rm, w_mr_inr, state_cov);
+    if (prev_var.time != Time(trajectory_.at(0).end_timestamp)) throw std::runtime_error{"inconsistent timestamp"};
+  }
+
+  /// udpate sliding window variables
+  {
+    //
+    if (index_frame == 1) {
+      const auto &prev_var = trajectory_vars_.at(index_frame);
+      sliding_window_filter_->addStateVariable(std::vector<StateVarBase::Ptr>{prev_var.T_rm, prev_var.w_mr_inr});
+    }
+
+    //
+    const auto &curr_var = trajectory_vars_.at(index_frame + 1);
+    sliding_window_filter_->addStateVariable(std::vector<StateVarBase::Ptr>{curr_var.T_rm, curr_var.w_mr_inr});
+
+    if ((index_frame - options_.delay_adding_points) > 0) {
+      const auto &pprev_var = trajectory_vars_.at(index_frame - options_.delay_adding_points);
+      sliding_window_filter_->marginalizeVariable(std::vector<StateVarBase::Ptr>{pprev_var.T_rm, pprev_var.w_mr_inr});
+    }
+  }
+
   // Get evaluator for query points
   std::vector<Evaluable<const_vel::Interface::PoseType>::ConstPtr> T_ms_intp_eval_vec;
   std::vector<Evaluable<const_vel::Interface::VelocityType>::ConstPtr> w_ms_ins_intp_eval_vec;
@@ -526,19 +556,18 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
   inner_timer.emplace_back("Add Cost Term ................ ", std::make_unique<Stopwatch<>>(false));
   bool innerloop_time = (options_.num_threads == 1);
 
-  // cost terms passed to the sliding window filter
-  std::vector<BaseCostTerm::ConstPtr> meas_cost_terms;
-
   //
   int num_iter_icp = index_frame < options_.init_num_frames ? 15 : options_.num_iters_icp;
   for (int iter(0); iter < num_iter_icp; iter++) {
     number_keypoints_used = 0;
 
-    // initialize problem
+    // initialize problem and states
+#if true
     OptimizationProblem problem(/* num_threads */ options_.num_threads);
-
-    // add variables
     for (const auto &var : steam_state_vars) problem.addStateVariable(var);
+#else
+    SlidingWindowFilter problem(sliding_window_filter_);
+#endif
 
     // add prior cost terms
     steam_trajectory->addPriorCostTerms(problem);
@@ -615,9 +644,7 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
 
 #pragma omp critical(odometry_cost_term)
           {
-            problem.addCostTerm(cost);
             meas_cost_terms.emplace_back(cost);
-
             number_keypoints_used++;
           }
 
@@ -648,9 +675,7 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
 
 #pragma omp critical(odometry_cost_term)
           {
-            problem.addCostTerm(cost);
             meas_cost_terms.emplace_back(cost);
-
             number_keypoints_used++;
           }
         }
@@ -668,14 +693,13 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
         const auto cost = WeightedLeastSqCostTerm<1>::MakeShared(error_func, noise_model, loss_func);
 
 #pragma omp critical(odometry_cost_term)
-        {
-          problem.addCostTerm(cost);
-          meas_cost_terms.emplace_back(cost);
-        }
+        { meas_cost_terms.emplace_back(cost); }
       }
 
       if (innerloop_time) inner_timer[2].second->stop();
     }
+
+    for (const auto &cost : meas_cost_terms) problem.addCostTerm(cost);
 
     timer[0].second->stop();
 
@@ -694,7 +718,6 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
     params.max_iterations = (unsigned int)options_.max_iterations;
     GaussNewtonSolver solver(problem, params);
     solver.optimize();
-    Covariance covariance(solver);
 
     timer[1].second->stop();
 
@@ -750,28 +773,6 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
   LOG(INFO) << "Optimizing in a sliding window!" << std::endl;
   {
     //
-    if (index_frame == 1) {
-      const auto &prev_var = trajectory_vars_.at(index_frame);
-      sliding_window_filter_->addStateVariable(std::vector<StateVarBase::Ptr>{prev_var.T_rm, prev_var.w_mr_inr});
-
-      /// add a prior to state at this time
-      lgmath::se3::Transformation T_rm;
-      Eigen::Matrix<double, 6, 1> w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
-      Eigen::Matrix<double, 12, 12> state_cov = Eigen::Matrix<double, 12, 12>::Identity() * 1e-4;
-      steam_trajectory->addStatePrior(prev_var.time, T_rm, w_mr_inr, state_cov);
-      if (prev_var.time != Time(trajectory_.at(0).end_timestamp)) throw std::runtime_error{"inconsistent timestamp"};
-    }
-
-    if ((index_frame - options_.delay_adding_points) > 0) {
-      const auto &pprev_var = trajectory_vars_.at(index_frame - options_.delay_adding_points);
-      sliding_window_filter_->marginalizeVariable(std::vector<StateVarBase::Ptr>{pprev_var.T_rm, pprev_var.w_mr_inr});
-    }
-
-    //
-    const auto &curr_var = trajectory_vars_.at(index_frame + 1);
-    sliding_window_filter_->addStateVariable(std::vector<StateVarBase::Ptr>{curr_var.T_rm, curr_var.w_mr_inr});
-
-    //
     steam_trajectory->addPriorCostTerms(*sliding_window_filter_);
     for (const auto &prior_cost_term : prior_cost_terms) sliding_window_filter_->addCostTerm(prior_cost_term);
     for (const auto &meas_cost_term : meas_cost_terms) sliding_window_filter_->addCostTerm(meas_cost_term);
@@ -779,9 +780,9 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
     //
     LOG(INFO) << "number of variables: " << sliding_window_filter_->getNumberOfVariables() << std::endl;
     LOG(INFO) << "number of cost terms: " << sliding_window_filter_->getNumberOfCostTerms() << std::endl;
-    if (sliding_window_filter_->getNumberOfVariables() > 10)
+    if (sliding_window_filter_->getNumberOfVariables() > 20)
       throw std::runtime_error{"too many variables in the filter!"};
-    if (sliding_window_filter_->getNumberOfCostTerms() > 10000)
+    if (sliding_window_filter_->getNumberOfCostTerms() > 50000)
       throw std::runtime_error{"too many cost terms in the filter!"};
 
     GaussNewtonSolver::Params params;
