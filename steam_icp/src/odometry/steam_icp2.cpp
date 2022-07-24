@@ -566,7 +566,7 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
     OptimizationProblem problem(/* num_threads */ options_.num_threads);
     for (const auto &var : steam_state_vars) problem.addStateVariable(var);
 #else
-    SlidingWindowFilter problem(sliding_window_filter_);
+    SlidingWindowFilter problem(*sliding_window_filter_);
 #endif
 
     // add prior cost terms
