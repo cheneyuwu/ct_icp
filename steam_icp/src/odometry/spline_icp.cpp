@@ -266,7 +266,7 @@ bool SplineOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
   LOG(INFO) << "number of cost terms: " << sliding_window_filter_->getNumberOfCostTerms() << std::endl;
   if (sliding_window_filter_->getNumberOfVariables() > 100)
     throw std::runtime_error{"too many variables in the filter!"};
-  if (sliding_window_filter_->getNumberOfCostTerms() > 100000)
+  if (sliding_window_filter_->getNumberOfCostTerms() > 500000)
     throw std::runtime_error{"too many cost terms in the filter!"};
 
   timer[0].second->stop();
