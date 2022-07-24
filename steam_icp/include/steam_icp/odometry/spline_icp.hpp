@@ -14,9 +14,11 @@ class SplineOdometry : public Odometry {
     // sensor vehicle transformation
     Eigen::Matrix<double, 4, 4> T_sr = Eigen::Matrix<double, 4, 4>::Identity();
     // trajectory
-    double knot_spacing = 0;
+    double knot_spacing = 0.1;
+    double window_delay = 0.0;
     // velocity prior (no side slipping)
     Eigen::Matrix<double, 6, 6> vp_cov = Eigen::Matrix<double, 6, 6>::Identity();
+    double vp_spacing = 0.1;
     // radial velocity
     STEAM_LOSS_FUNC rv_loss_func = STEAM_LOSS_FUNC::L2;
     double rv_cov_inv = 1.0;
@@ -27,19 +29,8 @@ class SplineOdometry : public Odometry {
     unsigned int num_threads = 1;
   };
 
-  SplineOdometry(const Options &options) : Odometry(options), options_(options) {
-    using namespace steam::traj;
-    steam_trajectory_ = bspline::Interface::MakeShared(Time(options_.knot_spacing));
-  }
-
-  ~SplineOdometry() override {
-    velocity_debug_file_.open(options_.debug_path + "/velocity.txt", std::ios::out);
-    for (auto &query_time : velocity_query_times_) {
-      const auto w_mr_inr = steam_trajectory_->getVelocityInterpolator(query_time)->evaluate();
-      velocity_debug_file_ << 0 << " " << query_time.nanosecs() << " " << w_mr_inr.transpose() << std::endl;
-    }
-    velocity_debug_file_.close();
-  }
+  SplineOdometry(const Options &options);
+  ~SplineOdometry();
 
   Trajectory trajectory() override { return trajectory_; }
 
@@ -50,12 +41,25 @@ class SplineOdometry : public Odometry {
   std::vector<Point3D> initializeFrame(int index_frame, const std::vector<Point3D> &const_frame);
   bool icp(int index_frame, std::vector<Point3D> &keypoints);
 
+ private:
   const Options options_;
 
-  steam::traj::bspline::Interface::Ptr steam_trajectory_;
+  // steam variables
+  steam::se3::SE3StateVar::Ptr T_sr_var_ = nullptr;  // robot to sensor transformation as a steam variable
 
-  std::ofstream velocity_debug_file_;
-  std::vector<steam::traj::Time> velocity_query_times_;
+  // trajectory variables
+  struct TrajectoryVar {
+    TrajectoryVar(const steam::traj::Time &t, const steam::vspace::VSpaceStateVar<6>::Ptr &w) : time(t), c(w) {}
+    steam::traj::Time time;
+    steam::vspace::VSpaceStateVar<6>::Ptr c;
+  };
+  std::vector<TrajectoryVar> trajectory_vars_;
+  int curr_active_idx_ = 0;
+
+  double curr_prior_time_ = 0.0;
+
+  steam::traj::bspline::Interface::Ptr spline_trajectory_;
+  steam::SlidingWindowFilter::Ptr sliding_window_filter_;
 
   STEAM_ICP_REGISTER_ODOMETRY("SPLINE", SplineOdometry);
 };

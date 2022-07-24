@@ -365,6 +365,8 @@ steam_icp::SLAMOptions loadOptions(const rclcpp::Node::SharedPtr &node) {
 
       ROS2_PARAM_CLAUSE(node, spline_icp_options, prefix, knot_spacing, double);
 
+      ROS2_PARAM_CLAUSE(node, spline_icp_options, prefix, window_delay, double);
+
       std::vector<double> vp_cov_diag;
       ROS2_PARAM_NO_LOG(node, vp_cov_diag, prefix, vp_cov_diag, std::vector<double>);
       if ((vp_cov_diag.size() != 6) && (vp_cov_diag.size() != 0))
@@ -374,6 +376,7 @@ steam_icp::SLAMOptions loadOptions(const rclcpp::Node::SharedPtr &node) {
             vp_cov_diag[4], vp_cov_diag[5];
       LOG(WARNING) << "Parameter " << prefix + "vp_cov_diag"
                    << " = " << spline_icp_options.vp_cov.diagonal().transpose() << std::endl;
+      ROS2_PARAM_CLAUSE(node, spline_icp_options, prefix, vp_spacing, double);
 
       std::string rv_loss_func;
       ROS2_PARAM(node, rv_loss_func, prefix, rv_loss_func, std::string);

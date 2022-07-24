@@ -52,6 +52,46 @@ void grid_sampling(const std::vector<Point3D> &frame, std::vector<Point3D> &keyp
 
 }  // namespace
 
+SplineOdometry::SplineOdometry(const Options &options) : Odometry(options), options_(options) {
+  // iniitalize steam vars
+  T_sr_var_ = steam::se3::SE3StateVar::MakeShared(lgmath::se3::Transformation(options_.T_sr));
+  T_sr_var_->locked() = true;
+
+  using namespace steam::traj;
+  sliding_window_filter_ = steam::SlidingWindowFilter::MakeShared(options_.num_threads);
+  spline_trajectory_ = bspline::Interface::MakeShared(Time(options_.knot_spacing));
+}
+
+SplineOdometry::~SplineOdometry() {
+  using namespace steam::traj;
+
+  std::ofstream trajectory_file;
+  // auto now = std::chrono::system_clock::now();
+  // auto utc = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
+  // trajectory_file.open(options_.debug_path + "/trajectory_" + std::to_string(utc) + ".txt", std::ios::out);
+  trajectory_file.open(options_.debug_path + "/trajectory.txt", std::ios::out);
+
+  LOG(INFO) << "Dumping trajectory." << std::endl;
+  double begin_time = trajectory_.front().begin_timestamp;
+  double end_time = trajectory_.back().end_timestamp;
+  double dt = 0.01;
+  for (double time = begin_time; time <= end_time; time += dt) {
+    Time steam_time(time);
+    //
+    Eigen::Matrix4d T_rm = Eigen::Matrix4d::Identity();
+    const auto w_mr_inr = spline_trajectory_->getVelocityInterpolator(steam_time)->evaluate();
+    //
+    trajectory_file << (0.0) << " " << steam_time.nanosecs() << " ";
+    trajectory_file << T_rm(0, 0) << " " << T_rm(0, 1) << " " << T_rm(0, 2) << " " << T_rm(0, 3) << " ";
+    trajectory_file << T_rm(1, 0) << " " << T_rm(1, 1) << " " << T_rm(1, 2) << " " << T_rm(1, 3) << " ";
+    trajectory_file << T_rm(2, 0) << " " << T_rm(2, 1) << " " << T_rm(2, 2) << " " << T_rm(2, 3) << " ";
+    trajectory_file << T_rm(3, 0) << " " << T_rm(3, 1) << " " << T_rm(3, 2) << " " << T_rm(3, 3) << " ";
+    trajectory_file << w_mr_inr(0) << " " << w_mr_inr(1) << " " << w_mr_inr(2) << " " << w_mr_inr(3) << " ";
+    trajectory_file << w_mr_inr(4) << " " << w_mr_inr(5) << std::endl;
+  }
+  LOG(INFO) << "Dumping trajectory. - DONE" << std::endl;
+}
+
 auto SplineOdometry::registerFrame(const std::vector<Point3D> &const_frame) -> RegistrationSummary {
   RegistrationSummary summary;
 
@@ -65,8 +105,7 @@ auto SplineOdometry::registerFrame(const std::vector<Point3D> &const_frame) -> R
   //
   auto frame = initializeFrame(index_frame, const_frame);
 
-  double sample_voxel_size =
-      index_frame < options_.init_num_frames ? options_.init_sample_voxel_size : options_.sample_voxel_size;
+  double sample_voxel_size = options_.sample_voxel_size;
 
   // downsample
   std::vector<Point3D> keypoints;
@@ -92,7 +131,7 @@ void SplineOdometry::initializeTimestamp(int index_frame, const std::vector<Poin
 
 std::vector<Point3D> SplineOdometry::initializeFrame(int index_frame, const std::vector<Point3D> &const_frame) {
   std::vector<Point3D> frame(const_frame);
-  double sample_size = index_frame < options_.init_num_frames ? options_.init_voxel_size : options_.voxel_size;
+  double sample_size = options_.voxel_size;
   std::mt19937_64 g;
   std::shuffle(frame.begin(), frame.end(), g);
   // Subsample the scan with voxels taking one random in every voxel
@@ -113,26 +152,11 @@ bool SplineOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
   timer.emplace_back("Instantiation .................. ", std::make_unique<Stopwatch<>>(false));
   timer.emplace_back("Optimization ................... ", std::make_unique<Stopwatch<>>(false));
 
-  /// Create robot to sensor transform variable, fixed.
-  const auto T_sr_var = SE3StateVar::MakeShared(lgmath::se3::Transformation(options_.T_sr));
-  T_sr_var->locked() = true;
-
-  // initialize problem
-  OptimizationProblem problem(/* num_threads */ options_.num_threads);
+  // cost terms passed to the sliding window filter
+  std::vector<BaseCostTerm::ConstPtr> prior_cost_terms;
+  std::vector<BaseCostTerm::ConstPtr> meas_cost_terms;
 
   timer[0].second->start();
-
-  // side slipping constraint
-  for (double t = 0.0; t <= 1.0; t += 0.1) {
-    const auto query_time = trajectory_[index_frame].begin_timestamp +
-                            t * (trajectory_[index_frame].end_timestamp - trajectory_[index_frame].begin_timestamp);
-    const auto w_mr_inr_intp_eval = steam_trajectory_->getVelocityInterpolator(Time(query_time));
-    const auto error_func = vspace_error<6>(w_mr_inr_intp_eval, Eigen::Matrix<double, 6, 1>::Zero());
-    const auto noise_model = StaticNoiseModel<6>::MakeShared(options_.vp_cov);
-    const auto loss_func = std::make_shared<L2LossFunc>();
-    const auto cost = WeightedLeastSqCostTerm<6>::MakeShared(error_func, noise_model, loss_func);
-    problem.addCostTerm(cost);
-  }
 
   // Get evaluator for query points
   std::vector<Evaluable<const_vel::Interface::VelocityType>::ConstPtr> w_ms_ins_intp_eval_vec;
@@ -142,8 +166,8 @@ bool SplineOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
         trajectory_[index_frame].begin_timestamp +
         keypoint.alpha_timestamp * (trajectory_[index_frame].end_timestamp - trajectory_[index_frame].begin_timestamp);
     // velocity
-    const auto w_mr_inr_intp_eval = steam_trajectory_->getVelocityInterpolator(Time(query_time));
-    const auto w_ms_ins_intp_eval = compose_velocity(T_sr_var, w_mr_inr_intp_eval);
+    const auto w_mr_inr_intp_eval = spline_trajectory_->getVelocityInterpolator(Time(query_time));
+    const auto w_ms_ins_intp_eval = compose_velocity(T_sr_var_, w_mr_inr_intp_eval);
     w_ms_ins_intp_eval_vec.emplace_back(w_ms_ins_intp_eval);
   }
 
@@ -175,15 +199,75 @@ bool SplineOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
 
     const auto cost = WeightedLeastSqCostTerm<1>::MakeShared(error_func, noise_model, loss_func);
 #pragma omp critical(odometry_cost_term)
-    { problem.addCostTerm(cost); }
+    { meas_cost_terms.emplace_back(cost); }
   }
 
-  //
   const double begin_timestamp = trajectory_[index_frame].begin_timestamp;
-  steam_trajectory_->setActiveWindow(Time(begin_timestamp));
+  const double end_timestamp = trajectory_[index_frame].end_timestamp;
+  LOG(INFO) << "begin time: " << begin_timestamp << std::endl;
+  LOG(INFO) << "end time: " << end_timestamp << std::endl;
 
-  // add variables
-  steam_trajectory_->addStateVariables(problem);
+  const double window_begin_timestamp = begin_timestamp - options_.window_delay;
+  LOG(INFO) << "marginalizing knots before time: " << window_begin_timestamp << std::endl;
+
+  // add new prior cost terms
+  double curr_prior_time = curr_prior_time_;
+  for (; curr_prior_time < end_timestamp; curr_prior_time += options_.vp_spacing) {
+    Time query_time(curr_prior_time);
+    const auto w_mr_inr_intp_eval = spline_trajectory_->getVelocityInterpolator(query_time);
+    const auto error_func = vspace_error<6>(w_mr_inr_intp_eval, Eigen::Matrix<double, 6, 1>::Zero());
+    const auto noise_model = StaticNoiseModel<6>::MakeShared(options_.vp_cov);
+    const auto loss_func = std::make_shared<L2LossFunc>();
+    const auto cost = WeightedLeastSqCostTerm<6>::MakeShared(error_func, noise_model, loss_func);
+    prior_cost_terms.emplace_back(cost);
+    LOG(INFO) << "adding prior at time: " << query_time.seconds() << std::endl;
+  }
+  curr_prior_time_ = curr_prior_time;
+
+  // add new variables
+  std::vector<StateVarBase::Ptr> new_variables;
+  Time end_steam_time = trajectory_vars_.empty() ? Time((double)-10000.0) : trajectory_vars_.back().time;
+  const auto &knot_map = spline_trajectory_->knot_map();
+  for (auto it = knot_map.lower_bound(end_steam_time); it != knot_map.end(); ++it) {
+    if (trajectory_vars_.empty() || (it->first > trajectory_vars_.back().time)) {
+      trajectory_vars_.emplace_back(it->first, it->second->getC());
+      new_variables.emplace_back(it->second->getC());
+      LOG(INFO) << "adding knot at time: " << it->first.seconds() << std::endl;
+
+      // add a weak prior
+      const auto error_func = vspace_error<6>(it->second->getC(), Eigen::Matrix<double, 6, 1>::Zero());
+      const auto noise_model = StaticNoiseModel<6>::MakeShared(Eigen::Matrix<double, 6, 6>::Identity() * 100.0);
+      const auto loss_func = std::make_shared<L2LossFunc>();
+      const auto cost = WeightedLeastSqCostTerm<6>::MakeShared(error_func, noise_model, loss_func);
+      prior_cost_terms.emplace_back(cost);
+    }
+  }
+  sliding_window_filter_->addStateVariable(new_variables);
+
+  // add cost terms to the sliding window filter
+  for (const auto &cost_term : meas_cost_terms) sliding_window_filter_->addCostTerm(cost_term);
+  for (const auto &cost_term : prior_cost_terms) sliding_window_filter_->addCostTerm(cost_term);
+
+  // marginalize some variables
+  std::vector<StateVarBase::Ptr> marginalize_variables;
+  int curr_active_idx = curr_active_idx_;
+  for (; curr_active_idx < (int)trajectory_vars_.size(); curr_active_idx++) {
+    if (trajectory_vars_.at(curr_active_idx).time.seconds() < window_begin_timestamp) {
+      LOG(INFO) << "marginalizing knot at time: " << trajectory_vars_.at(curr_active_idx).time.seconds() << std::endl;
+      marginalize_variables.emplace_back(trajectory_vars_.at(curr_active_idx).c);
+    } else {
+      break;
+    }
+  }
+  curr_active_idx_ = curr_active_idx;
+  sliding_window_filter_->marginalizeVariable(marginalize_variables);
+
+  LOG(INFO) << "number of variables: " << sliding_window_filter_->getNumberOfVariables() << std::endl;
+  LOG(INFO) << "number of cost terms: " << sliding_window_filter_->getNumberOfCostTerms() << std::endl;
+  if (sliding_window_filter_->getNumberOfVariables() > 100)
+    throw std::runtime_error{"too many variables in the filter!"};
+  if (sliding_window_filter_->getNumberOfCostTerms() > 100000)
+    throw std::runtime_error{"too many cost terms in the filter!"};
 
   timer[0].second->stop();
 
@@ -191,27 +275,15 @@ bool SplineOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
 
   // Solve
   GaussNewtonSolver::Params params;
-  params.verbose = options_.verbose;
-  params.max_iterations = (unsigned int)options_.max_iterations;
-  GaussNewtonSolver(problem, params).optimize();
-
+  params.max_iterations = options_.max_iterations;
+  GaussNewtonSolver solver(*sliding_window_filter_, params);
+  solver.optimize();
   timer[1].second->stop();
 
   /// Debug print
   if (options_.debug_print) {
     for (size_t i = 0; i < timer.size(); i++)
       LOG(INFO) << "Elapsed " << timer[i].first << *(timer[i].second) << std::endl;
-  }
-
-  if (options_.debug_print) {
-    const double begin_timestamp = trajectory_[index_frame].begin_timestamp;
-    const double end_timestamp = trajectory_[index_frame].end_timestamp;
-    const int num_states = 10;
-    const double time_diff = (end_timestamp - begin_timestamp) / (static_cast<double>(num_states) - 1.0);
-    for (int i = 0; i < num_states; ++i) {
-      Time query_time(static_cast<double>(begin_timestamp + (double)i * time_diff));
-      velocity_query_times_.push_back(query_time);
-    }
   }
 
   return true;

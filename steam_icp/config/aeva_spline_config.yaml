@@ -29,9 +29,9 @@
     # ODOMETRY OPTIONS ----
     odometry: SPLINE
     odometry_options:
-      init_num_frames: 20
+      init_num_frames: 0
       voxel_size: 0.5 # The voxel size for the grid sampling of the new frame (before keypoints extraction)
-      sample_voxel_size: 1.5 # The size of a voxel for the selection of `keypoints` by grid sampling
+      sample_voxel_size: 0.5 # The size of a voxel for the selection of `keypoints` by grid sampling
 
       size_voxel_map: 1.0 # The voxel size of in the voxel map
       min_distance_points: 0.1
@@ -49,8 +49,10 @@
         T_sr_vec: [-0.835, -0.39, 0.103, 0.0, 0.0, 0.0] # davids result without side slip
 
         knot_spacing: 0.2
+        window_delay: 0.2
 
         vp_cov_diag: [1000.0, 0.001, 0.001, 1.0, 1.0, 1000.0]
+        vp_spacing: 0.02
 
         rv_loss_func: L2
         rv_cov_inv: 0.1
