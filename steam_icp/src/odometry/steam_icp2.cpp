@@ -273,6 +273,7 @@ auto SteamOdometry2::registerFrame(const std::vector<Point3D> &const_frame) -> R
     const auto end_T_rm_var = SE3StateVar::MakeShared(T_rm);
     const auto end_w_mr_inr_var = VSpaceStateVar<6>::MakeShared(w_mr_inr);
     trajectory_vars_.emplace_back(end_steam_time, end_T_rm_var, end_w_mr_inr_var);
+    to_marginalize_ = 1;  /// The first state is not added to the filter
 
     trajectory_[index_frame].end_T_rm_cov = Eigen::Matrix<double, 6, 6>::Identity() * 1e-4;
     trajectory_[index_frame].end_w_mr_inr_cov = Eigen::Matrix<double, 6, 6>::Identity() * 1e-4;
@@ -394,16 +395,26 @@ void SteamOdometry2::updateMap(int index_frame, int update_frame) {
   using namespace steam::se3;
   using namespace steam::traj;
 
+  Time begin_steam_time = trajectory_[update_frame].begin_timestamp;
+  Time end_steam_time = trajectory_[update_frame].end_timestamp;
+
+  // consistency check
+  const auto &begin_var = trajectory_vars_.at(to_marginalize_ - 1);
+  if (begin_var.time > begin_steam_time) throw std::runtime_error("begin_var.time > begin_steam_time");
+
+  // construct the trajectory for interpolation
+  int num_states = 0;
   const auto update_trajectory = const_vel::Interface::MakeShared(options_.qc_inv);
-  const auto &prev_var = trajectory_vars_.at(update_frame);
-  update_trajectory->add(prev_var.time, prev_var.T_rm, prev_var.w_mr_inr);
-  const auto &curr_var = trajectory_vars_.at(update_frame + 1);
-  if ((prev_var.time != Time(trajectory_[update_frame - 1].end_timestamp)) &&
-      (prev_var.time != Time(trajectory_[update_frame].begin_timestamp)))
-    throw std::runtime_error{"previous end timestamp mismatch"};
-  if (curr_var.time != Time(trajectory_[update_frame].end_timestamp))
-    throw std::runtime_error{"current end timestamp mismatch"};
-  update_trajectory->add(curr_var.time, curr_var.T_rm, curr_var.w_mr_inr);
+  for (size_t i = (to_marginalize_ - 1); i < trajectory_vars_.size(); i++) {
+    const auto &var = trajectory_vars_.at(i);
+    update_trajectory->add(var.time, var.T_rm, var.w_mr_inr);
+    num_states++;
+    if (var.time == end_steam_time) break;
+    if (var.time > end_steam_time) throw std::runtime_error("var.time > end_steam_time, should not happen");
+  }
+
+  LOG(INFO) << "Adding points to map between (inclusive): " << begin_steam_time.seconds() << " - "
+            << end_steam_time.seconds() << ", with num states: " << num_states << std::endl;
 
   for (auto &point : frame) {
     const double query_time = point.timestamp;
@@ -441,6 +452,8 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
   std::vector<StateVarBase::Ptr> steam_state_vars;
   std::vector<BaseCostTerm::ConstPtr> prior_cost_terms;
   std::vector<BaseCostTerm::ConstPtr> meas_cost_terms;
+  const size_t prev_trajectory_var_index = trajectory_vars_.size() - 1;
+  size_t curr_trajectory_var_index = trajectory_vars_.size() - 1;
 
   /// use previous trajectory to initialize steam state variables
   LOG(INFO) << "[CT_ICP_STEAM] prev scan end time: " << trajectory_[index_frame - 1].end_timestamp << std::endl;
@@ -490,13 +503,12 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
       prior_cost_terms.emplace_back(WeightedLeastSqCostTerm<6>::MakeShared(error_func, noise_model, loss_func));
     }
     // cache the end state in full steam trajectory because it will be used again
-    if (i == (knot_times.size() - 1)) {
-      trajectory_vars_.emplace_back(knot_steam_time, T_rm_var, w_mr_inr_var);
-    }
+    trajectory_vars_.emplace_back(knot_steam_time, T_rm_var, w_mr_inr_var);
+    curr_trajectory_var_index++;
   }
 
   if (index_frame == 1) {
-    const auto &prev_var = trajectory_vars_.at(index_frame);
+    const auto &prev_var = trajectory_vars_.at(prev_trajectory_var_index);
     /// add a prior to state at the beginning
     lgmath::se3::Transformation T_rm;
     Eigen::Matrix<double, 6, 1> w_mr_inr = Eigen::Matrix<double, 6, 1>::Zero();
@@ -505,21 +517,46 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
     if (prev_var.time != Time(trajectory_.at(0).end_timestamp)) throw std::runtime_error{"inconsistent timestamp"};
   }
 
-  /// udpate sliding window variables
+  /// update sliding window variables
   {
     //
     if (index_frame == 1) {
-      const auto &prev_var = trajectory_vars_.at(index_frame);
+      const auto &prev_var = trajectory_vars_.at(prev_trajectory_var_index);
       sliding_window_filter_->addStateVariable(std::vector<StateVarBase::Ptr>{prev_var.T_rm, prev_var.w_mr_inr});
     }
 
     //
-    const auto &curr_var = trajectory_vars_.at(index_frame + 1);
-    sliding_window_filter_->addStateVariable(std::vector<StateVarBase::Ptr>{curr_var.T_rm, curr_var.w_mr_inr});
+    for (size_t i = prev_trajectory_var_index + 1; i <= curr_trajectory_var_index; ++i) {
+      const auto &var = trajectory_vars_.at(i);
+      sliding_window_filter_->addStateVariable(std::vector<StateVarBase::Ptr>{var.T_rm, var.w_mr_inr});
+    }
 
+    //
     if ((index_frame - options_.delay_adding_points) > 0) {
-      const auto &pprev_var = trajectory_vars_.at(index_frame - options_.delay_adding_points);
-      sliding_window_filter_->marginalizeVariable(std::vector<StateVarBase::Ptr>{pprev_var.T_rm, pprev_var.w_mr_inr});
+      //
+      const double begin_marg_time = trajectory_vars_.at(to_marginalize_).time.seconds();
+      double end_marg_time = trajectory_vars_.at(to_marginalize_).time.seconds();
+      std::vector<StateVarBase::Ptr> marg_vars;
+      int num_states = 0;
+      //
+      double marg_time = trajectory_.at(index_frame - options_.delay_adding_points - 1).end_timestamp;
+      Time marg_steam_time(marg_time);
+      for (size_t i = to_marginalize_; i <= curr_trajectory_var_index; ++i) {
+        const auto &var = trajectory_vars_.at(i);
+        if (var.time <= marg_steam_time) {
+          end_marg_time = var.time.seconds();
+          marg_vars.emplace_back(var.T_rm);
+          marg_vars.emplace_back(var.w_mr_inr);
+          num_states++;
+        } else {
+          to_marginalize_ = i;
+          break;
+        }
+      }
+      sliding_window_filter_->marginalizeVariable(marg_vars);
+      //
+      LOG(INFO) << "Marginalizing time (inclusive): " << begin_marg_time << " - " << end_marg_time
+                << ", with num states: " << num_states << std::endl;
     }
   }
 
@@ -728,16 +765,16 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
 
     auto &current_estimate = trajectory_[index_frame];
 
-    Time begin_steam_time(static_cast<double>(trajectory_[index_frame].begin_timestamp));
-    const auto begin_T_mr = inverse(steam_trajectory->getPoseInterpolator(begin_steam_time))->evaluate().matrix();
+    Time curr_begin_steam_time(static_cast<double>(trajectory_[index_frame].begin_timestamp));
+    const auto begin_T_mr = inverse(steam_trajectory->getPoseInterpolator(curr_begin_steam_time))->evaluate().matrix();
     const auto begin_T_ms = begin_T_mr * options_.T_sr.inverse();
     diff_trans += (current_estimate.begin_t - begin_T_ms.block<3, 1>(0, 3)).norm();
     diff_rot += AngularDistance(current_estimate.begin_R, begin_T_ms.block<3, 3>(0, 0));
     current_estimate.begin_R = begin_T_ms.block<3, 3>(0, 0);
     current_estimate.begin_t = begin_T_ms.block<3, 1>(0, 3);
 
-    Time end_steam_time(static_cast<double>(trajectory_[index_frame].end_timestamp));
-    const auto end_T_mr = inverse(steam_trajectory->getPoseInterpolator(end_steam_time))->evaluate().matrix();
+    Time curr_end_steam_time(static_cast<double>(trajectory_[index_frame].end_timestamp));
+    const auto end_T_mr = inverse(steam_trajectory->getPoseInterpolator(curr_end_steam_time))->evaluate().matrix();
     const auto end_T_ms = end_T_mr * options_.T_sr.inverse();
     diff_trans += (current_estimate.end_t - end_T_ms.block<3, 1>(0, 3)).norm();
     diff_rot += AngularDistance(current_estimate.end_R, end_T_ms.block<3, 3>(0, 0));
@@ -780,7 +817,7 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
     //
     LOG(INFO) << "number of variables: " << sliding_window_filter_->getNumberOfVariables() << std::endl;
     LOG(INFO) << "number of cost terms: " << sliding_window_filter_->getNumberOfCostTerms() << std::endl;
-    if (sliding_window_filter_->getNumberOfVariables() > 20)
+    if (sliding_window_filter_->getNumberOfVariables() > 100)
       throw std::runtime_error{"too many variables in the filter!"};
     if (sliding_window_filter_->getNumberOfCostTerms() > 50000)
       throw std::runtime_error{"too many cost terms in the filter!"};
@@ -791,19 +828,10 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
     solver.optimize();
   }
 
-  /// update trajectory
-  const auto update_trajectory = const_vel::Interface::MakeShared(options_.qc_inv);
-
-  /// add variables
-  const auto &prev_var = trajectory_vars_.at(index_frame);
-  update_trajectory->add(prev_var.time, prev_var.T_rm, prev_var.w_mr_inr);
-  const auto &curr_var = trajectory_vars_.at(index_frame + 1);
-  update_trajectory->add(curr_var.time, curr_var.T_rm, curr_var.w_mr_inr);
-
   // clang-format off
   auto &current_estimate = trajectory_[index_frame];
   Time curr_begin_steam_time(static_cast<double>(current_estimate.begin_timestamp));
-  const auto curr_begin_T_mr = inverse(update_trajectory->getPoseInterpolator(curr_begin_steam_time))->evaluate().matrix();
+  const auto curr_begin_T_mr = inverse(steam_trajectory->getPoseInterpolator(curr_begin_steam_time))->evaluate().matrix();
   const auto curr_begin_T_ms = curr_begin_T_mr * options_.T_sr.inverse();
   current_estimate.begin_R = curr_begin_T_ms.block<3, 3>(0, 0);
   current_estimate.begin_t = curr_begin_T_ms.block<3, 1>(0, 3);

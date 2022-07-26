@@ -80,6 +80,7 @@ class SteamOdometry2 : public Odometry {
     steam::vspace::VSpaceStateVar<6>::Ptr w_mr_inr;
   };
   std::vector<TrajectoryVar> trajectory_vars_;
+  size_t to_marginalize_ = 0;
 
   steam::SlidingWindowFilter::Ptr sliding_window_filter_;
 
