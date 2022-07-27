@@ -367,6 +367,8 @@ steam_icp::SLAMOptions loadOptions(const rclcpp::Node::SharedPtr &node) {
 
       ROS2_PARAM_CLAUSE(node, spline_icp_options, prefix, window_delay, double);
 
+      ROS2_PARAM_CLAUSE(node, spline_icp_options, prefix, c_cov, double);
+
       std::vector<double> vp_cov_diag;
       ROS2_PARAM_NO_LOG(node, vp_cov_diag, prefix, vp_cov_diag, std::vector<double>);
       if ((vp_cov_diag.size() != 6) && (vp_cov_diag.size() != 0))

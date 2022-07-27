@@ -234,11 +234,11 @@ bool SplineOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
       new_variables.emplace_back(it->second->getC());
       LOG(INFO) << "adding knot at time: " << it->first.seconds() << std::endl;
 
-      // add a weak prior
-      const auto error_func = vspace_error<6>(it->second->getC(), Eigen::Matrix<double, 6, 1>::Zero());
-      const auto noise_model = StaticNoiseModel<6>::MakeShared(Eigen::Matrix<double, 6, 6>::Identity() * 100.0);
-      const auto loss_func = std::make_shared<L2LossFunc>();
-      const auto cost = WeightedLeastSqCostTerm<6>::MakeShared(error_func, noise_model, loss_func);
+      // add a weak prior on c vector
+      auto error_func = vspace_error<6>(it->second->getC(), Eigen::Matrix<double, 6, 1>::Zero());
+      auto noise_model = StaticNoiseModel<6>::MakeShared(Eigen::Matrix<double, 6, 6>::Identity() * options_.c_cov);
+      auto loss_func = std::make_shared<L2LossFunc>();
+      auto cost = WeightedLeastSqCostTerm<6>::MakeShared(error_func, noise_model, loss_func);
       prior_cost_terms.emplace_back(cost);
     }
   }

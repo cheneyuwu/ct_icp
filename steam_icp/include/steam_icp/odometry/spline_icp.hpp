@@ -16,6 +16,8 @@ class SplineOdometry : public Odometry {
     // trajectory
     double knot_spacing = 0.1;
     double window_delay = 0.0;
+    // regularization
+    double c_cov = 1.0;
     // velocity prior (no side slipping)
     Eigen::Matrix<double, 6, 6> vp_cov = Eigen::Matrix<double, 6, 6>::Identity();
     double vp_spacing = 0.1;
