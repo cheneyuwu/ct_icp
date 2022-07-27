@@ -4,9 +4,9 @@
 
 namespace steam_icp {
 
-class BoreasVelodyneSequence : public Sequence {
+class DICPSequence : public Sequence {
  public:
-  BoreasVelodyneSequence(const Options& options);
+  DICPSequence(const Options& options);
 
   int currFrame() const override { return curr_frame_; }
   int numFrames() const override { return last_frame_ - init_frame_; }
@@ -18,15 +18,15 @@ class BoreasVelodyneSequence : public Sequence {
  private:
   std::string dir_path_;
   std::vector<std::string> filenames_;
-  int64_t initial_timestamp_micro_;
+  std::vector<double> timestamps_;
   int init_frame_ = 0;
   int curr_frame_ = 0;
   int last_frame_ = std::numeric_limits<int>::max();  // exclusive bound
 };
 
-class BoreasVelodyneDataset : public Dataset {
+class DICPDataset : public Dataset {
  public:
-  BoreasVelodyneDataset(const Options& options) : Dataset(options) {
+  DICPDataset(const Options& options) : Dataset(options) {
     if (options_.all_sequences)
       sequences_ = SEQUENCES;
     else
@@ -38,7 +38,7 @@ class BoreasVelodyneDataset : public Dataset {
     if (!hasNext()) return nullptr;
     Sequence::Options options(options_);
     options.sequence = sequences_[next_sequence_++];
-    return std::make_shared<BoreasVelodyneSequence>(options);
+    return std::make_shared<DICPSequence>(options);
   }
 
  private:
@@ -47,13 +47,14 @@ class BoreasVelodyneDataset : public Dataset {
 
  private:
   static inline std::vector<std::string> SEQUENCES{
-      "boreas-2022-05-13-09-23",  // highway 7
-      "boreas-2022-05-13-10-30",  // marc santi
-      "boreas-2022-05-13-11-47",  // glen shields
-      "boreas-2022-05-18-17-23",  // cocksfield
+      "brisbane-lagoon-freeway",  //
+      "bunker-road",              //
+      "bunker-road-vehicles",     //
+      "robin-williams-tunnel",    //
+      "san-francisco-city",       //
   };
 
-  STEAM_ICP_REGISTER_DATASET("BOREAS", BoreasVelodyneDataset);
+  STEAM_ICP_REGISTER_DATASET("DICP", DICPDataset);
 };
 
 }  // namespace steam_icp

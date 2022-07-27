@@ -127,3 +127,4 @@ struct DatasetRegister {
 #include "steam_icp/datasets/boreas_velodyne.hpp"
 #include "steam_icp/datasets/kitti_360.hpp"
 #include "steam_icp/datasets/kitti_raw.hpp"
+#include "steam_icp/datasets/dicp.hpp"
