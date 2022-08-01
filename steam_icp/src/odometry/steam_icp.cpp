@@ -166,7 +166,7 @@ SteamOdometry::~SteamOdometry() {
   // trajectory_file.open(options_.debug_path + "/trajectory.txt", std::ios::out);
 
   LOG(INFO) << "Building full trajectory." << std::endl;
-  auto full_trajectory = steam::traj::const_vel::Interface::MakeShared(options_.qc_inv);
+  auto full_trajectory = steam::traj::const_vel::Interface::MakeShared(options_.qc_diag);
   for (auto &var : trajectory_vars_) {
     full_trajectory->add(var.time, var.T_rm, var.w_mr_inr);
   }
@@ -194,7 +194,7 @@ SteamOdometry::~SteamOdometry() {
 
 Trajectory SteamOdometry::trajectory() {
   LOG(INFO) << "Building full trajectory." << std::endl;
-  auto full_trajectory = steam::traj::const_vel::Interface::MakeShared(options_.qc_inv);
+  auto full_trajectory = steam::traj::const_vel::Interface::MakeShared(options_.qc_diag);
   for (auto &var : trajectory_vars_) {
     full_trajectory->add(var.time, var.T_rm, var.w_mr_inr);
   }
@@ -392,7 +392,7 @@ void SteamOdometry::updateMap(int index_frame, int update_frame) {
   using namespace steam::se3;
   using namespace steam::traj;
 
-  const auto update_trajectory = const_vel::Interface::MakeShared(options_.qc_inv);
+  const auto update_trajectory = const_vel::Interface::MakeShared(options_.qc_diag);
   const auto &prev_var = trajectory_vars_.at(update_frame);
   update_trajectory->add(prev_var.time, prev_var.T_rm, prev_var.w_mr_inr);
   const auto &curr_var = trajectory_vars_.at(update_frame + 1);
@@ -435,7 +435,7 @@ bool SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
   bool icp_success = true;
 
   ///
-  const auto steam_trajectory = const_vel::Interface::MakeShared(options_.qc_inv);
+  const auto steam_trajectory = const_vel::Interface::MakeShared(options_.qc_diag);
   std::vector<StateVarBase::Ptr> steam_state_vars;
   std::vector<BaseCostTerm::ConstPtr> prior_cost_terms;
   std::vector<BaseCostTerm::ConstPtr> meas_cost_terms;

@@ -211,15 +211,14 @@ steam_icp::SLAMOptions loadOptions(const rclcpp::Node::SharedPtr &node) {
                    << " = " << std::endl
                    << steam_icp_options.T_sr << std::endl;
 
-      std::vector<double> qc_inv_diag;
-      ROS2_PARAM_NO_LOG(node, qc_inv_diag, prefix, qc_inv_diag, std::vector<double>);
-      if ((qc_inv_diag.size() != 6) && (qc_inv_diag.size() != 0))
+      std::vector<double> qc_diag;
+      ROS2_PARAM_NO_LOG(node, qc_diag, prefix, qc_diag, std::vector<double>);
+      if ((qc_diag.size() != 6) && (qc_diag.size() != 0))
         throw std::invalid_argument{"Qc diagonal malformed. Must be 6 elements!"};
-      if (qc_inv_diag.size() == 6)
-        steam_icp_options.qc_inv.diagonal() << qc_inv_diag[0], qc_inv_diag[1], qc_inv_diag[2], qc_inv_diag[3],
-            qc_inv_diag[4], qc_inv_diag[5];
-      LOG(WARNING) << "Parameter " << prefix + "qc_inv_diag"
-                   << " = " << steam_icp_options.qc_inv.diagonal().transpose() << std::endl;
+      if (qc_diag.size() == 6)
+        steam_icp_options.qc_diag << qc_diag[0], qc_diag[1], qc_diag[2], qc_diag[3], qc_diag[4], qc_diag[5];
+      LOG(WARNING) << "Parameter " << prefix + "qc_diag"
+                   << " = " << steam_icp_options.qc_diag.transpose() << std::endl;
 
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, num_extra_states, int);
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, add_prev_state, bool);
@@ -287,15 +286,14 @@ steam_icp::SLAMOptions loadOptions(const rclcpp::Node::SharedPtr &node) {
                    << " = " << std::endl
                    << steam_icp_options.T_sr << std::endl;
 
-      std::vector<double> qc_inv_diag;
-      ROS2_PARAM_NO_LOG(node, qc_inv_diag, prefix, qc_inv_diag, std::vector<double>);
-      if ((qc_inv_diag.size() != 6) && (qc_inv_diag.size() != 0))
+      std::vector<double> qc_diag;
+      ROS2_PARAM_NO_LOG(node, qc_diag, prefix, qc_diag, std::vector<double>);
+      if ((qc_diag.size() != 6) && (qc_diag.size() != 0))
         throw std::invalid_argument{"Qc diagonal malformed. Must be 6 elements!"};
-      if (qc_inv_diag.size() == 6)
-        steam_icp_options.qc_inv.diagonal() << qc_inv_diag[0], qc_inv_diag[1], qc_inv_diag[2], qc_inv_diag[3],
-            qc_inv_diag[4], qc_inv_diag[5];
-      LOG(WARNING) << "Parameter " << prefix + "qc_inv_diag"
-                   << " = " << steam_icp_options.qc_inv.diagonal().transpose() << std::endl;
+      if (qc_diag.size() == 6)
+        steam_icp_options.qc_diag << qc_diag[0], qc_diag[1], qc_diag[2], qc_diag[3], qc_diag[4], qc_diag[5];
+      LOG(WARNING) << "Parameter " << prefix + "qc_diag"
+                   << " = " << steam_icp_options.qc_diag.transpose() << std::endl;
 
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, num_extra_states, int);
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, add_prev_state, bool);

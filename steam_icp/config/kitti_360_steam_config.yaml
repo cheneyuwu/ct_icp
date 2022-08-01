@@ -47,7 +47,7 @@
       steam:
         T_sr_vec: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
-        qc_inv_diag: [0.05, 0.05, 1.0, 1.0, 1.0, 0.05]
+        qc_diag: [20.0, 20.0, 1.0, 1.0, 1.0, 20.0]
         num_extra_states: 0
         add_prev_state: true
         num_extra_prev_states: 0

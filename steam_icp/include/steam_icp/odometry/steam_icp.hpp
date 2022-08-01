@@ -15,7 +15,7 @@ class SteamOdometry : public Odometry {
     // sensor vehicle transformation
     Eigen::Matrix<double, 4, 4> T_sr = Eigen::Matrix<double, 4, 4>::Identity();
     // trajectory
-    Eigen::Matrix<double, 6, 6> qc_inv = Eigen::Matrix<double, 6, 6>::Identity();
+    Eigen::Matrix<double, 6, 1> qc_diag = Eigen::Matrix<double, 6, 1>::Ones();
     int num_extra_states = 0;
     //
     bool add_prev_state = false;

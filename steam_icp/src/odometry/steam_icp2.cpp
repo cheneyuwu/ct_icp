@@ -168,7 +168,7 @@ SteamOdometry2::~SteamOdometry2() {
   // trajectory_file.open(options_.debug_path + "/trajectory.txt", std::ios::out);
 
   LOG(INFO) << "Building full trajectory." << std::endl;
-  auto full_trajectory = steam::traj::const_vel::Interface::MakeShared(options_.qc_inv);
+  auto full_trajectory = steam::traj::const_vel::Interface::MakeShared(options_.qc_diag);
   for (auto &var : trajectory_vars_) {
     full_trajectory->add(var.time, var.T_rm, var.w_mr_inr);
   }
@@ -182,21 +182,22 @@ SteamOdometry2::~SteamOdometry2() {
     //
     const auto T_rm = full_trajectory->getPoseInterpolator(steam_time)->evaluate().matrix();
     const auto w_mr_inr = full_trajectory->getVelocityInterpolator(steam_time)->evaluate();
-    //
-    trajectory_file << (0.0) << " " << steam_time.nanosecs() << " ";
-    trajectory_file << T_rm(0, 0) << " " << T_rm(0, 1) << " " << T_rm(0, 2) << " " << T_rm(0, 3) << " ";
-    trajectory_file << T_rm(1, 0) << " " << T_rm(1, 1) << " " << T_rm(1, 2) << " " << T_rm(1, 3) << " ";
-    trajectory_file << T_rm(2, 0) << " " << T_rm(2, 1) << " " << T_rm(2, 2) << " " << T_rm(2, 3) << " ";
-    trajectory_file << T_rm(3, 0) << " " << T_rm(3, 1) << " " << T_rm(3, 2) << " " << T_rm(3, 3) << " ";
-    trajectory_file << w_mr_inr(0) << " " << w_mr_inr(1) << " " << w_mr_inr(2) << " " << w_mr_inr(3) << " ";
-    trajectory_file << w_mr_inr(4) << " " << w_mr_inr(5) << std::endl;
+    // clang-format off
+    trajectory_file << std::fixed << std::setprecision(12) << (0.0) << " " << steam_time.nanosecs() << " "
+                    << T_rm(0, 0) << " " << T_rm(0, 1) << " " << T_rm(0, 2) << " " << T_rm(0, 3) << " "
+                    << T_rm(1, 0) << " " << T_rm(1, 1) << " " << T_rm(1, 2) << " " << T_rm(1, 3) << " "
+                    << T_rm(2, 0) << " " << T_rm(2, 1) << " " << T_rm(2, 2) << " " << T_rm(2, 3) << " "
+                    << T_rm(3, 0) << " " << T_rm(3, 1) << " " << T_rm(3, 2) << " " << T_rm(3, 3) << " "
+                    << w_mr_inr(0) << " " << w_mr_inr(1) << " " << w_mr_inr(2) << " " << w_mr_inr(3) << " "
+                    << w_mr_inr(4) << " " << w_mr_inr(5) << std::endl;
+    // clang-format on
   }
   LOG(INFO) << "Dumping trajectory. - DONE" << std::endl;
 }
 
 Trajectory SteamOdometry2::trajectory() {
   LOG(INFO) << "Building full trajectory." << std::endl;
-  auto full_trajectory = steam::traj::const_vel::Interface::MakeShared(options_.qc_inv);
+  auto full_trajectory = steam::traj::const_vel::Interface::MakeShared(options_.qc_diag);
   for (auto &var : trajectory_vars_) {
     full_trajectory->add(var.time, var.T_rm, var.w_mr_inr);
   }
@@ -404,7 +405,7 @@ void SteamOdometry2::updateMap(int index_frame, int update_frame) {
 
   // construct the trajectory for interpolation
   int num_states = 0;
-  const auto update_trajectory = const_vel::Interface::MakeShared(options_.qc_inv);
+  const auto update_trajectory = const_vel::Interface::MakeShared(options_.qc_diag);
   for (size_t i = (to_marginalize_ - 1); i < trajectory_vars_.size(); i++) {
     const auto &var = trajectory_vars_.at(i);
     update_trajectory->add(var.time, var.T_rm, var.w_mr_inr);
@@ -448,7 +449,7 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
   bool icp_success = true;
 
   ///
-  const auto steam_trajectory = const_vel::Interface::MakeShared(options_.qc_inv);
+  const auto steam_trajectory = const_vel::Interface::MakeShared(options_.qc_diag);
   std::vector<StateVarBase::Ptr> steam_state_vars;
   std::vector<BaseCostTerm::ConstPtr> prior_cost_terms;
   std::vector<BaseCostTerm::ConstPtr> meas_cost_terms;
@@ -824,6 +825,7 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
 
     GaussNewtonSolver::Params params;
     params.max_iterations = 20;
+    params.reuse_previous_pattern = false;
     GaussNewtonSolver solver(*sliding_window_filter_, params);
     solver.optimize();
   }
