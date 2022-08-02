@@ -13,14 +13,14 @@
       raw_points: false
       sampled_points: false
       map_points: false
-      T_sr_vec: [1.42, 0.24, 1.37, 0.0, 0.0, 0.0]
+      T_sr_vec: [-1.42, -0.24, -1.37, 0.0, 0.0, 0.0]
 
     # DATASET OPTIONS ----
     dataset: DICP # Options: [KITTI_raw / KITTI_CARLA / KITTI / KITTI-360 / BOREAS / AEVA]
     dataset_options:
       all_sequences: true
       root_path: /home/yuchen/ASRL/data/aeva
-      sequence: "robin-williams-tunnel"
+      sequence: "brisbane-lagoon-freeway"
       init_frame: 0
       last_frame: 100000
       min_dist_lidar_center: 5.0
@@ -46,7 +46,7 @@
       debug_path: /home/yuchen/ASRL/temp/doppler_odometry/dicp/steam
 
       steam:
-        T_sr_vec: [1.42, 0.24, 1.37, 0.0, 0.0, 0.0]
+        T_sr_vec: [-1.42, -0.24, -1.37, 0.0, 0.0, 0.0]
 
         qc_diag: [20.0, 20.0, 1.0, 1.0, 1.0, 20.0]
         num_extra_states: 0
@@ -70,8 +70,8 @@
 
         use_rv: false
         merge_p2p_rv: false
-        rv_cov_inv: 0.1
-        rv_loss_threshold: 0.1
+        rv_cov_inv: 0.05
+        rv_loss_threshold: 0.05
 
         verbose: false
         max_iterations: 5
