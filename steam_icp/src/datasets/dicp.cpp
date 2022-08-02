@@ -4,6 +4,8 @@
 #include <filesystem>
 #include <fstream>
 
+#include "steam_icp/datasets/utils.hpp"
+
 namespace steam_icp {
 
 namespace {
@@ -63,6 +65,61 @@ std::vector<Point3D> readPointCloud(const std::string &path, const double &time_
 
   return frame;
 }
+
+/* -------------------------------------------------------------------------------------------------------------- */
+ArrayPoses loadPoses(const std::string &file_path) {
+  ArrayPoses poses;
+  std::ifstream pFile(file_path);
+  if (pFile.is_open()) {
+    while (!pFile.eof()) {
+      std::string line;
+      std::getline(pFile, line);
+      if (line.empty()) continue;
+      std::stringstream ss(line);
+      double timestamp, x, y, z, qx, qy, qz, qw;
+      ss >> timestamp >> x >> y >> z >> qx >> qy >> qz >> qw;
+
+      // translation part
+      Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+      T(0, 3) = x;
+      T(1, 3) = y;
+      T(2, 3) = z;
+
+      // rotation part
+      Eigen::Quaterniond q(qw, qx, qy, qz);
+      Eigen::Matrix4d R = Eigen::Matrix4d::Identity();
+      R.block<3, 3>(0, 0) = q.normalized().toRotationMatrix();
+
+      //
+      Eigen::Matrix4d P(T * R);
+      poses.push_back(P);
+    }
+    pFile.close();
+  } else {
+    throw std::runtime_error{"unable to open file: " + file_path};
+  }
+  return poses;
+}
+
+/* -------------------------------------------------------------------------------------------------------------- */
+ArrayPoses transformTrajectory(const Trajectory &trajectory) {
+  // Hardcoded values
+  Eigen::Matrix3d C_rs = Eigen::Matrix3d::Identity();
+  Eigen::Vector3d r_sr_inr{1.42, 0.24, 1.37};
+
+  Eigen::Matrix4d T_rs = Eigen::Matrix4d::Identity();
+  T_rs.block<3, 3>(0, 0) = C_rs;
+  T_rs.block<3, 1>(0, 3) = r_sr_inr;
+
+  ArrayPoses poses;
+  poses.reserve(trajectory.size());
+  for (auto &frame : trajectory) {
+    Eigen::Matrix4d T_s0_sk = frame.getMidPose();
+    poses.emplace_back(T_rs * T_s0_sk * T_rs.inverse());
+  }
+  return poses;
+}
+
 }  // namespace
 
 DICPSequence::DICPSequence(const Options &options) : Sequence(options) {
@@ -82,10 +139,13 @@ DICPSequence::DICPSequence(const Options &options) : Sequence(options) {
     str >> timestamp;
     timestamps_.push_back(timestamp);
   }
+  if ((int)timestamps_.size() != last_frame_)
+    throw std::runtime_error{"timestamp file and point cloud file number mismatch"};
+
   //
   last_frame_ = std::min(last_frame_, options_.last_frame);
-  curr_frame_ = std::max((int)1, options_.init_frame);  // first frame of this dataset is redundant
-  init_frame_ = std::max((int)1, options_.init_frame);  // first frame of this dataset is redundant
+  curr_frame_ = std::max(0, options_.init_frame);
+  init_frame_ = std::max(0, options_.init_frame);
 }
 
 std::vector<Point3D> DICPSequence::next() {
@@ -120,6 +180,22 @@ void DICPSequence::save(const std::string &path, const Trajectory &trajectory) c
              << R(1, 2) << " " << t(1) << " " << R(2, 0) << " " << R(2, 1) << " " << R(2, 2) << " " << t(2)
              << std::endl;
   }
+}
+
+auto DICPSequence::evaluate(const Trajectory &trajectory) const -> SeqError {
+  //
+  std::string ground_truth_file = options_.root_path + "/" + options_.sequence + "/ref_poses.txt";
+  const auto gt_poses_full = loadPoses(ground_truth_file);
+  const ArrayPoses gt_poses(gt_poses_full.begin() + init_frame_, gt_poses_full.begin() + last_frame_);
+
+  //
+  const auto poses = transformTrajectory(trajectory);
+
+  //
+  if (gt_poses.size() == 0 || gt_poses.size() != poses.size())
+    throw std::runtime_error{"estimated and ground truth poses are not the same size."};
+
+  return evaluateOdometry(gt_poses, poses);
 }
 
 }  // namespace steam_icp

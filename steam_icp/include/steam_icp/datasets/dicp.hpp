@@ -15,6 +15,9 @@ class DICPSequence : public Sequence {
 
   void save(const std::string& path, const Trajectory& trajectory) const override;
 
+  bool hasGroundTruth() const override { return true; }
+  SeqError evaluate(const Trajectory& trajectory) const override;
+
  private:
   std::string dir_path_;
   std::vector<std::string> filenames_;
