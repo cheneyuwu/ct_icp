@@ -577,6 +577,16 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
     w_ms_ins_intp_eval_vec.emplace_back(w_ms_ins_intp_eval);
   }
 
+  // Initialize keypoints
+#pragma omp parallel for num_threads(options_.num_threads)
+  for (int i = 0; i < (int)keypoints.size(); i++) {
+    auto &keypoint = keypoints[i];
+    const auto &T_ms_intp_eval = T_ms_intp_eval_vec[i];
+
+    const auto T_ms = T_ms_intp_eval->evaluate().matrix();
+    keypoint.pt = T_ms.block<3, 3>(0, 0) * keypoint.raw_pt + T_ms.block<3, 1>(0, 3);
+  }
+
   // For the 50 first frames, visit 2 voxels
   const short nb_voxels_visited = index_frame < options_.init_num_frames ? 2 : 1;
   int number_keypoints_used = 0;
