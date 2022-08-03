@@ -48,8 +48,10 @@ class Sequence {
       Error(double t_err, double r_err) : t_err(t_err), r_err(r_err) {}
     };
     std::vector<Error> tab_errors;
-    double mean_rpe;
-    double mean_rpe_2d;
+    double mean_t_rpe_2d;
+    double mean_r_rpe_2d;
+    double mean_t_rpe;
+    double mean_r_rpe;
     double mean_ape;
     double max_ape;
     double mean_local_err;
@@ -125,6 +127,6 @@ struct DatasetRegister {
 ///
 #include "steam_icp/datasets/boreas_aeva.hpp"
 #include "steam_icp/datasets/boreas_velodyne.hpp"
+#include "steam_icp/datasets/dicp.hpp"
 #include "steam_icp/datasets/kitti_360.hpp"
 #include "steam_icp/datasets/kitti_raw.hpp"
-#include "steam_icp/datasets/dicp.hpp"

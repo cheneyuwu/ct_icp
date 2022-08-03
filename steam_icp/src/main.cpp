@@ -567,13 +567,20 @@ int main(int argc, char **argv) {
     // ground truth
     if (seq->hasGroundTruth()) {
       const auto seq_error = seq->evaluate(odometry->trajectory());
-      LOG(WARNING) << "Mean RPE : " << seq_error.mean_rpe << std::endl;
-      LOG(WARNING) << "Mean RPE 2D : " << seq_error.mean_rpe_2d << std::endl;
+      LOG(WARNING) << "Mean RPE : " << seq_error.mean_t_rpe << std::endl;
+      LOG(WARNING) << "Mean RPE 2D : " << seq_error.mean_t_rpe_2d << std::endl;
       LOG(WARNING) << "Mean APE : " << seq_error.mean_ape << std::endl;
       LOG(WARNING) << "Max APE : " << seq_error.max_ape << std::endl;
       LOG(WARNING) << "Mean Local Error : " << seq_error.mean_local_err << std::endl;
       LOG(WARNING) << "Max Local Error : " << seq_error.max_local_err << std::endl;
       LOG(WARNING) << "Index Max Local Error : " << seq_error.index_max_local_err << std::endl;
+      // clang-format off
+      LOG(WARNING) << "KITTI Summary : "
+                   << std::fixed << std::setprecision(2) << seq_error.mean_t_rpe_2d << " & "
+                   << std::fixed << std::setprecision(4) << seq_error.mean_r_rpe_2d << " & "
+                   << std::fixed << std::setprecision(2) << seq_error.mean_t_rpe << " & "
+                   << std::fixed << std::setprecision(4) << seq_error.mean_r_rpe << "\\\\" << std::endl;
+      // clang-format on
       LOG(WARNING) << std::endl;
 
       sequence_errors.emplace_back(seq_error);

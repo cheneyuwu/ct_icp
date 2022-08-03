@@ -1,5 +1,7 @@
 #include "steam_icp/datasets/utils.hpp"
 
+#include "lgmath.hpp"
+
 namespace steam_icp {
 
 namespace {
@@ -8,12 +10,18 @@ double translationError(const Eigen::Matrix4d &pose_error) { return pose_error.b
 
 double translationError2D(const Eigen::Matrix4d &pose_error) { return pose_error.block<2, 1>(0, 3).norm(); }
 
-double rotationError(Eigen::Matrix4d &pose_error) {
+double rotationError(const Eigen::Matrix4d &pose_error) {
   double a = pose_error(0, 0);
   double b = pose_error(1, 1);
   double c = pose_error(2, 2);
   double d = 0.5 * (a + b + c - 1.0);
   return std::acos(std::max(std::min(d, 1.0), -1.0));
+}
+
+double rotationError2D(Eigen::Matrix4d &pose_error) {
+  auto pose_error_projected = lgmath::se3::tran2vec(pose_error);
+  pose_error_projected.segment<3>(2) = Eigen::Vector3d::Zero();
+  return rotationError(lgmath::se3::vec2tran(pose_error_projected));
 }
 
 std::vector<double> trajectoryDistances(const ArrayPoses &poses) {
@@ -40,8 +48,10 @@ void computeMeanRPE(const ArrayPoses &poses_gt, const ArrayPoses &poses_result, 
   std::vector<double> dist = trajectoryDistances(poses_gt);
 
   int num_total = 0;
-  double mean_rpe = 0;
-  double mean_rpe_2d = 0;
+  double mean_t_rpe = 0;
+  double mean_t_rpe_2d = 0;
+  double mean_r_rpe = 0;
+  double mean_r_rpe_2d = 0;
   // for all start positions do
   for (int first_frame = 0; first_frame < (int)poses_gt.size(); first_frame += step_size) {
     // for all segment lengths do
@@ -62,16 +72,21 @@ void computeMeanRPE(const ArrayPoses &poses_gt, const ArrayPoses &poses_result, 
       double t_err = translationError(pose_error);
       double t_err_2d = translationError2D(pose_error);
       double r_err = rotationError(pose_error);
+      double r_err_2d = rotationError2D(pose_error);
       seq_err.tab_errors.emplace_back(t_err / len, r_err / len);
 
-      mean_rpe += t_err / len;
-      mean_rpe_2d += t_err_2d / len;
+      mean_t_rpe += t_err / len;
+      mean_t_rpe_2d += t_err_2d / len;
+      mean_r_rpe = r_err / len;
+      mean_r_rpe_2d = r_err_2d / len;
       num_total++;
     }
   }
 
-  seq_err.mean_rpe = ((mean_rpe / static_cast<double>(num_total)) * 100.0);
-  seq_err.mean_rpe_2d = ((mean_rpe_2d / static_cast<double>(num_total)) * 100.0);
+  seq_err.mean_t_rpe = ((mean_t_rpe / static_cast<double>(num_total)) * 100.0);
+  seq_err.mean_t_rpe_2d = ((mean_t_rpe_2d / static_cast<double>(num_total)) * 100.0);
+  seq_err.mean_r_rpe = ((mean_r_rpe / static_cast<double>(num_total)) * 180.0 / M_PI);
+  seq_err.mean_r_rpe_2d = ((mean_r_rpe_2d / static_cast<double>(num_total)) * 180.0 / M_PI);
 }
 
 }  // namespace
