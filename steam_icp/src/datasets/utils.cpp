@@ -77,8 +77,8 @@ void computeMeanRPE(const ArrayPoses &poses_gt, const ArrayPoses &poses_result, 
 
       mean_t_rpe += t_err / len;
       mean_t_rpe_2d += t_err_2d / len;
-      mean_r_rpe = r_err / len;
-      mean_r_rpe_2d = r_err_2d / len;
+      mean_r_rpe += r_err / len;
+      mean_r_rpe_2d += r_err_2d / len;
       num_total++;
     }
   }
