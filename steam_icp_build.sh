@@ -17,9 +17,10 @@
 #   -v ${HOME}:${HOME}:rw \
 #   -v ${HOME}/ASRL:${HOME}/ASRL:rw \
 #   -v ${HOME}/ASRL/data/boreas:${HOME}/ASRL/data/boreas \
+#   -v /media/yuchen/T7/ASRL/data/dicp_corrected:${HOME}/ASRL/data/dicp_corrected \
+# 	-v /media/yuchen/T7/ASRL/data/dicp:${HOME}/ASRL/data/dicp \
 #   -v /media/yuchen/T7/ASRL/data/kitti_raw:${HOME}/ASRL/data/kitti_raw \
 # 	-v /media/yuchen/T7/ASRL/data/kitti_360:${HOME}/ASRL/data/kitti_360 \
-# 	-v /media/yuchen/T7/ASRL/data/aeva:${HOME}/ASRL/data/aeva \
 #   ct_icp
 
 BUILD_TYPE=$1
@@ -57,14 +58,14 @@ check_status_code() {
 	fi
 }
 
-echo "[STEAM_ICP] -- [EXTERNAL DEPENDENCIES] -- Generating the cmake project"
-cd ${EXT_BUILD_DIR}
-cmake -G "$GENERATOR" -S $EXT_SRC_DIR -DCMAKE_BUILD_TYPE=${BUILD_TYPE}
-check_status_code $?
+# echo "[STEAM_ICP] -- [EXTERNAL DEPENDENCIES] -- Generating the cmake project"
+# cd ${EXT_BUILD_DIR}
+# cmake -G "$GENERATOR" -S $EXT_SRC_DIR -DCMAKE_BUILD_TYPE=${BUILD_TYPE}
+# check_status_code $?
 
-echo "[STEAM_ICP] -- [EXTERNAL DEPENDENCIES] -- building CMake Project"
-cmake --build . --config $BUILD_TYPE
-check_status_code $?
+# echo "[STEAM_ICP] -- [EXTERNAL DEPENDENCIES] -- building CMake Project"
+# cmake --build . --config $BUILD_TYPE
+# check_status_code $?
 
 echo "[STEAM_ICP] -- [LGMATH] -- Generating the cmake project"
 cd ${LGMATH_BUILD_DIR}
