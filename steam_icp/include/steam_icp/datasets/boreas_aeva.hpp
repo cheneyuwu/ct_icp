@@ -57,8 +57,8 @@ class BoreasAevaDataset : public Dataset {
       "boreas-2022-05-13-10-30",  // marc santi
       "boreas-2022-05-13-11-47",  // glen shields
       "boreas-2022-05-18-17-23",  // cocksfield
-      "boreas-2022-07-19-15-52",  // debug (static, with beam id)
       "boreas-2022-07-19-16-06",  // short sequence near utias, with beam id
+      "boreas-2022-07-19-15-52",  // debug (static, with beam id, no ground truth)
   };
 
   STEAM_ICP_REGISTER_DATASET("AEVA", BoreasAevaDataset);

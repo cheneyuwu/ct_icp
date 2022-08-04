@@ -165,7 +165,9 @@ steam_icp::SLAMOptions loadOptions(const rclcpp::Node::SharedPtr &node) {
   {
     std::string prefix = "";
     ROS2_PARAM_CLAUSE(node, options, prefix, odometry, std::string);
-    if (options.odometry == "STEAM")
+    if (options.odometry == "Elastic")
+      options.odometry_options = std::make_shared<ElasticOdometry::Options>();
+    else if (options.odometry == "STEAM")
       options.odometry_options = std::make_shared<SteamOdometry::Options>();
     else if (options.odometry == "STEAM2")
       options.odometry_options = std::make_shared<SteamOdometry2::Options>();
@@ -197,7 +199,17 @@ steam_icp::SLAMOptions loadOptions(const rclcpp::Node::SharedPtr &node) {
     ROS2_PARAM_CLAUSE(node, odometry_options, prefix, debug_print, bool);
     ROS2_PARAM_CLAUSE(node, odometry_options, prefix, debug_path, std::string);
 
-    if (options.odometry == "STEAM") {
+    if (options.odometry == "Elastic") {
+      auto &elastic_icp_options = dynamic_cast<ElasticOdometry::Options &>(odometry_options);
+      prefix = "odometry_options.elastic.";
+
+      ROS2_PARAM_CLAUSE(node, elastic_icp_options, prefix, beta_location_consistency, double);
+      ROS2_PARAM_CLAUSE(node, elastic_icp_options, prefix, beta_constant_velocity, double);
+      ROS2_PARAM_CLAUSE(node, elastic_icp_options, prefix, max_dist_to_plane, double);
+      ROS2_PARAM_CLAUSE(node, elastic_icp_options, prefix, convergence_threshold, double);
+      ROS2_PARAM_CLAUSE(node, elastic_icp_options, prefix, num_threads, int);
+
+    } else if (options.odometry == "STEAM") {
       auto &steam_icp_options = dynamic_cast<SteamOdometry::Options &>(odometry_options);
       prefix = "odometry_options.steam.";
 
