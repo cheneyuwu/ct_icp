@@ -24,8 +24,8 @@ ros2 run steam_icp steam_icp --ros-args --params-file ${WORKING_DIR}/steam_icp/c
 
 ################# boreas #################
 ## Evaluate odometry
-source ${HOME}/ASRL/venv/bin/activate
-cd ${WORKING_DIR}/ros2/ct_icp_slam/script
+source ${WORKING_DIR}/venv/bin/activate
+cd ${WORKING_DIR}/steam_icp/script
 DATASET_DIR=${HOME}/ASRL/data/boreas/sequences
 RESULT_DIR=${HOME}/ASRL/temp/doppler_odometry/boreas/velodyne/elastic # change output directory
 python generate_boreas_odometry_result.py --dataset ${DATASET_DIR} --path ${RESULT_DIR} --sensor velodyne
@@ -34,7 +34,7 @@ python -m pyboreas.eval.odometry --gt ${DATASET_DIR} --pred ${RESULT_DIR}/boreas
 ################# aeva #################
 ## Evaluate odometry
 source ${WORKING_DIR}/venv/bin/activate
-cd ${WORKING_DIR}/ros2/ct_icp_slam/script
+cd ${WORKING_DIR}/steam_icp/script
 DATASET_DIR=${HOME}/ASRL/data/boreas/sequences
 RESULT_DIR=${HOME}/ASRL/temp/doppler_odometry/boreas/aeva/elastic # change output directory
 python generate_boreas_odometry_result.py --dataset ${DATASET_DIR} --path ${RESULT_DIR} --sensor aeva

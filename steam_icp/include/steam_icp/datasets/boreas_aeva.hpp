@@ -53,10 +53,10 @@ class BoreasAevaDataset : public Dataset {
 
  private:
   static inline std::vector<std::string> SEQUENCES{
-      "boreas-2022-05-13-09-23",  // highway 7
-      "boreas-2022-05-13-10-30",  // marc santi
-      "boreas-2022-05-13-11-47",  // glen shields
-      "boreas-2022-05-18-17-23",  // cocksfield
+      // "boreas-2022-05-13-09-23",  // highway 7
+      // "boreas-2022-05-13-10-30",  // marc santi
+      // "boreas-2022-05-13-11-47",  // glen shields
+      // "boreas-2022-05-18-17-23",  // cocksfield
       "boreas-2022-07-19-16-06",  // short sequence near utias, with beam id
       // "boreas-2022-07-19-15-52",  // debug (static, with beam id, no ground truth)
   };
