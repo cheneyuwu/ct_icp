@@ -16,7 +16,7 @@
       T_sr_vec: [-1.42, -0.24, -1.37, 0.0, 0.0, 0.0]
 
     # DATASET OPTIONS ----
-    dataset: DICP # Options: [KITTI_raw / KITTI_CARLA / KITTI / KITTI-360 / BOREAS / AEVA]
+    dataset: DICP
     dataset_options:
       all_sequences: true
       root_path: /home/yuchen/ASRL/data/dicp
