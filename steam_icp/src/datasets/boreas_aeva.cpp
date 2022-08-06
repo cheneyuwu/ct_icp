@@ -10,27 +10,21 @@ namespace steam_icp {
 
 namespace {
 
-inline Eigen::Matrix3d roll(const double & r) {
+inline Eigen::Matrix3d roll(const double &r) {
   Eigen::Matrix3d res;
-  res << 1.,           0.,          0.,
-         0.,  std::cos(r), std::sin(r),
-         0., -std::sin(r), std::cos(r);
+  res << 1., 0., 0., 0., std::cos(r), std::sin(r), 0., -std::sin(r), std::cos(r);
   return res;
 }
 
-inline Eigen::Matrix3d pitch(const double & p) {
+inline Eigen::Matrix3d pitch(const double &p) {
   Eigen::Matrix3d res;
-  res << std::cos(p), 0., -std::sin(p),
-         0.,          1.,           0.,
-         std::sin(p), 0.,  std::cos(p);
+  res << std::cos(p), 0., -std::sin(p), 0., 1., 0., std::sin(p), 0., std::cos(p);
   return res;
 }
 
-inline Eigen::Matrix3d yaw(const double & y) {
+inline Eigen::Matrix3d yaw(const double &y) {
   Eigen::Matrix3d res;
-  res <<  std::cos(y), std::sin(y), 0.,
-         -std::sin(y), std::cos(y), 0.,
-                   0.,          0., 1.;
+  res << std::cos(y), std::sin(y), 0., -std::sin(y), std::cos(y), 0., 0., 0., 1.;
   return res;
 }
 
@@ -43,26 +37,33 @@ ArrayPoses loadPoses(const std::string &file_path) {
   std::ifstream pose_file(file_path);
   if (pose_file.is_open()) {
     std::string line;
-    std::getline(pose_file, line);   // header
+    std::getline(pose_file, line);  // header
     for (; std::getline(pose_file, line);) {
       if (line.empty()) continue;
       std::stringstream ss(line);
 
-      int64_t timestamp=0;
+      int64_t timestamp = 0;
       Eigen::Matrix4d T_ms = Eigen::Matrix4d::Identity();
-      double r=0, p=0, y=0;
+      double r = 0, p = 0, y = 0;
 
-      for (int i=0; i<10; ++i) {
+      for (int i = 0; i < 10; ++i) {
         std::string value;
         std::getline(ss, value, ',');
 
-        if (i == 0) timestamp = std::stol(value);
-        else if (i == 1) T_ms(0, 3) = std::stod(value);
-        else if (i == 2) T_ms(1, 3) = std::stod(value);
-        else if (i == 3) T_ms(2, 3) = std::stod(value);
-        else if (i == 7) r = std::stod(value);
-        else if (i == 8) p = std::stod(value);
-        else if (i == 9) y = std::stod(value);
+        if (i == 0)
+          timestamp = std::stol(value);
+        else if (i == 1)
+          T_ms(0, 3) = std::stod(value);
+        else if (i == 2)
+          T_ms(1, 3) = std::stod(value);
+        else if (i == 3)
+          T_ms(2, 3) = std::stod(value);
+        else if (i == 7)
+          r = std::stod(value);
+        else if (i == 8)
+          p = std::stod(value);
+        else if (i == 9)
+          y = std::stod(value);
       }
       T_ms.block<3, 3>(0, 0) = rpy2rot(r, p, y);
 
@@ -78,8 +79,6 @@ ArrayPoses loadPoses(const std::string &file_path) {
   }
   return poses;
 }
-
-
 
 Eigen::MatrixXd readCSVtoEigenXd(std::ifstream &csv) {
   std::string line;
@@ -229,6 +228,8 @@ BoreasAevaSequence::BoreasAevaSequence(const Options &options) : Sequence(option
   if (std::filesystem::exists(calib_path)) {
     getCalibData(calib_path, rt_parts_, azi_ranges_, vel_means_);
     has_beam_id_ = true;
+  } else {
+    throw std::runtime_error("BoreasAevaSequence: calibration data not found");
   }
 }
 
