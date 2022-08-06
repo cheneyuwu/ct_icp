@@ -105,7 +105,45 @@ Neighborhood compute_neighborhood_distribution(const ArrayVector3d &points) {
 
 ElasticOdometry::ElasticOdometry(const Options &options) : Odometry(options), options_(options) {}
 
-ElasticOdometry::~ElasticOdometry() {}
+ElasticOdometry::~ElasticOdometry() {
+  std::ofstream trajectory_file;
+  auto now = std::chrono::system_clock::now();
+  auto utc = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
+  trajectory_file.open(options_.debug_path + "/trajectory_" + std::to_string(utc) + ".txt", std::ios::out);
+  // trajectory_file.open(options_.debug_path + "/trajectory.txt", std::ios::out);
+
+  LOG(INFO) << "Dumping trajectory." << std::endl;
+  for (const auto &frame : trajectory_) {
+    // clang-format off
+    double begin_time = frame.begin_timestamp;
+    double end_time = frame.end_timestamp;
+
+    Eigen::Matrix4d begin_T_ms = Eigen::Matrix4d::Identity();
+    begin_T_ms.block<3, 3>(0, 0) = frame.begin_R;
+    begin_T_ms.block<3, 1>(0, 3) = frame.begin_t;
+    Eigen::Matrix4d begin_T_sm = begin_T_ms.inverse();
+    Eigen::Matrix4d end_T_ms = Eigen::Matrix4d::Identity();
+    end_T_ms.block<3, 3>(0, 0) = frame.end_R;
+    end_T_ms.block<3, 1>(0, 3) = frame.end_t;
+    Eigen::Matrix4d end_T_sm = end_T_ms.inverse();
+    Eigen::Matrix<double, 6, 1> w_ms_ins = lgmath::se3::tran2vec(end_T_sm * begin_T_ms) / (end_time - begin_time);
+
+    trajectory_file << std::fixed << std::setprecision(12) << (0.0) << " " << static_cast<int64_t>(begin_time * 1e6) * 1000 << " "
+                    << begin_T_sm(0, 0) << " " << begin_T_sm(0, 1) << " " << begin_T_sm(0, 2) << " " << begin_T_sm(0, 3) << " "
+                    << begin_T_sm(1, 0) << " " << begin_T_sm(1, 1) << " " << begin_T_sm(1, 2) << " " << begin_T_sm(1, 3) << " "
+                    << begin_T_sm(2, 0) << " " << begin_T_sm(2, 1) << " " << begin_T_sm(2, 2) << " " << begin_T_sm(2, 3) << " "
+                    << begin_T_sm(3, 0) << " " << begin_T_sm(3, 1) << " " << begin_T_sm(3, 2) << " " << begin_T_sm(3, 3) << " "
+                    << w_ms_ins(0) << " " << w_ms_ins(1) << " " << w_ms_ins(2) << " " << w_ms_ins(3) << " " << w_ms_ins(4) << " " << w_ms_ins(5) << std::endl;
+    trajectory_file << std::fixed << std::setprecision(12) << (0.0) << " " << static_cast<int64_t>(end_time * 1e6) * 1000 << " "
+                    << end_T_sm(0, 0) << " " << end_T_sm(0, 1) << " " << end_T_sm(0, 2) << " " << end_T_sm(0, 3) << " "
+                    << end_T_sm(1, 0) << " " << end_T_sm(1, 1) << " " << end_T_sm(1, 2) << " " << end_T_sm(1, 3) << " "
+                    << end_T_sm(2, 0) << " " << end_T_sm(2, 1) << " " << end_T_sm(2, 2) << " " << end_T_sm(2, 3) << " "
+                    << end_T_sm(3, 0) << " " << end_T_sm(3, 1) << " " << end_T_sm(3, 2) << " " << end_T_sm(3, 3) << " "
+                    << w_ms_ins(0) << " " << w_ms_ins(1) << " " << w_ms_ins(2) << " " << w_ms_ins(3) << " " << w_ms_ins(4) << " " << w_ms_ins(5) << std::endl;
+    // clang-format on
+  }
+  LOG(INFO) << "Dumping trajectory. - DONE" << std::endl;
+}
 
 Trajectory ElasticOdometry::trajectory() { return trajectory_; }
 
