@@ -46,8 +46,17 @@
       debug_path: /home/yuchen/ASRL/temp/doppler_odometry/dicp/elastic
 
       elastic:
+        power_planarity: 2.0
         beta_location_consistency: 0.001
+        beta_orientation_consistency: 0.0
         beta_constant_velocity: 0.001
+        beta_small_velocity: 0.0
         max_dist_to_plane: 0.3
+        loss_function: CAUCHY
+        sigma: 0.1
+        tolerant_min_threshold: 0.05
+        max_iterations: 5
+        weight_alpha: 0.9
+        weight_neighborhood: 0.1
         convergence_threshold: 0.0001
         num_threads: 10
