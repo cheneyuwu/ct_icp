@@ -12,6 +12,13 @@ using ArrayPoses = ArrayMatrix4d;
 struct TrajectoryFrame {
   TrajectoryFrame() = default;
 
+  Eigen::Matrix4d getBeginPose() const {
+    Eigen::Matrix4d begin_pose = Eigen::Matrix4d::Identity();
+    begin_pose.block<3, 3>(0, 0) = begin_R;
+    begin_pose.block<3, 1>(0, 3) = begin_t;
+    return begin_pose;
+  }
+
   Eigen::Matrix4d getMidPose() const {
     Eigen::Matrix4d mid_pose = Eigen::Matrix4d::Identity();
     auto q_begin = Eigen::Quaterniond(begin_R);
