@@ -61,7 +61,7 @@ class Sequence {
     double mean_num_attempts;
   };
   virtual bool hasGroundTruth() const { return false; }
-  virtual SeqError evaluate(const Trajectory & /* trajectory */) const {
+  virtual SeqError evaluate(const std::string & /* path */, const Trajectory & /* trajectory */) const {
     throw std::runtime_error("no ground truth available");
   }
 

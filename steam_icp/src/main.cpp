@@ -578,7 +578,7 @@ int main(int argc, char **argv) {
 
     // ground truth
     if (seq->hasGroundTruth()) {
-      const auto seq_error = seq->evaluate(odometry->trajectory());
+      const auto seq_error = seq->evaluate(options.output_dir, odometry->trajectory());
       LOG(WARNING) << "Mean RPE : " << seq_error.mean_t_rpe << std::endl;
       LOG(WARNING) << "Mean RPE 2D : " << seq_error.mean_t_rpe_2d << std::endl;
       LOG(WARNING) << "Mean APE : " << seq_error.mean_ape << std::endl;

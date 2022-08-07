@@ -1,5 +1,8 @@
 #include "steam_icp/datasets/utils.hpp"
 
+#include <fstream>
+#include <iomanip>
+
 #include "lgmath.hpp"
 
 namespace steam_icp {
@@ -91,14 +94,18 @@ void computeMeanRPE(const ArrayPoses &poses_gt, const ArrayPoses &poses_result, 
 
 }  // namespace
 
-Sequence::SeqError evaluateOdometry(const ArrayPoses &poses_gt, const ArrayPoses &poses_estimated) {
+Sequence::SeqError evaluateOdometry(const std::string &filename, const ArrayPoses &poses_gt, const ArrayPoses &poses_estimated) {
+  std::ofstream errorfile(filename);
+  if (!errorfile.is_open()) throw std::runtime_error{"failed to open file: " + filename};
+  errorfile << std::setprecision(std::numeric_limits<long double>::digits10 + 1);
+
   Sequence::SeqError seq_err;
 
   // Compute Mean and Max APE (Mean and Max Absolute Pose Error)
   seq_err.mean_ape = 0.0;
   seq_err.max_ape = 0.0;
   for (size_t i = 0; i < poses_gt.size(); i++) {
-    double t_ape_err = translationError(poses_estimated[i].inverse() * poses_gt[i]);
+    double t_ape_err = translationError(poses_estimated[i].inverse() * poses_gt[0].inverse() * poses_gt[i]);
     seq_err.mean_ape += t_ape_err;
     if (seq_err.max_ape < t_ape_err) {
       seq_err.max_ape = t_ape_err;
@@ -118,6 +125,8 @@ Sequence::SeqError evaluateOdometry(const ArrayPoses &poses_gt, const ArrayPoses
       seq_err.max_local_err = t_local_err;
       seq_err.index_max_local_err = i;
     }
+
+    errorfile << t_local_err << std::endl;
   }
   seq_err.mean_local_err /= static_cast<double>(poses_gt.size() - 1);
 

@@ -272,7 +272,7 @@ void BoreasAevaSequence::save(const std::string &path, const Trajectory &traject
   }
 }
 
-auto BoreasAevaSequence::evaluate(const Trajectory &trajectory) const -> SeqError {
+auto BoreasAevaSequence::evaluate(const std::string &path, const Trajectory &trajectory) const -> SeqError {
   //
   std::string ground_truth_file = options_.root_path + "/" + options_.sequence + "/applanix/aeva_poses.csv";
   const auto gt_poses_full = loadPoses(ground_truth_file);
@@ -289,7 +289,8 @@ auto BoreasAevaSequence::evaluate(const Trajectory &trajectory) const -> SeqErro
   if (gt_poses.size() == 0 || gt_poses.size() != poses.size())
     throw std::runtime_error{"estimated and ground truth poses are not the same size."};
 
-  return evaluateOdometry(gt_poses, poses);
+  const auto filename = path + "/" + options_.sequence + "_eval.txt";
+  return evaluateOdometry(filename, gt_poses, poses);
 }
 
 }  // namespace steam_icp
