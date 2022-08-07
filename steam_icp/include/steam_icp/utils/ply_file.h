@@ -38,9 +38,9 @@ class PlyFile : public File {
   plyFormat _format;
 
   int _propertyNum;
-  string* _propertyName;
   plyTypes* _propertyType;
   int* _propertySize;
+  string* _propertyName;
 
   int _numPoints;
   int _pointSize;

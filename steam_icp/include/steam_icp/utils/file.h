@@ -14,7 +14,7 @@ class File {
   ~File();
 
  protected:
-  const openMode _mode;
   string _path;
+  const openMode _mode;
   fstream _file;
 };

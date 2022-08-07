@@ -167,6 +167,8 @@ steam_icp::SLAMOptions loadOptions(const rclcpp::Node::SharedPtr &node) {
     ROS2_PARAM_CLAUSE(node, options, prefix, odometry, std::string);
     if (options.odometry == "Elastic")
       options.odometry_options = std::make_shared<ElasticOdometry::Options>();
+    else if (options.odometry == "CeresElastic")
+      options.odometry_options = std::make_shared<CeresElasticOdometry::Options>();
     else if (options.odometry == "STEAM")
       options.odometry_options = std::make_shared<SteamOdometry::Options>();
     else if (options.odometry == "STEAM2")
@@ -203,11 +205,43 @@ steam_icp::SLAMOptions loadOptions(const rclcpp::Node::SharedPtr &node) {
       auto &elastic_icp_options = dynamic_cast<ElasticOdometry::Options &>(odometry_options);
       prefix = "odometry_options.elastic.";
 
+      ROS2_PARAM_CLAUSE(node, elastic_icp_options, prefix, power_planarity, double);
       ROS2_PARAM_CLAUSE(node, elastic_icp_options, prefix, beta_location_consistency, double);
       ROS2_PARAM_CLAUSE(node, elastic_icp_options, prefix, beta_constant_velocity, double);
       ROS2_PARAM_CLAUSE(node, elastic_icp_options, prefix, max_dist_to_plane, double);
       ROS2_PARAM_CLAUSE(node, elastic_icp_options, prefix, convergence_threshold, double);
       ROS2_PARAM_CLAUSE(node, elastic_icp_options, prefix, num_threads, int);
+    } else if (options.odometry == "CeresElastic") {
+      auto &ceres_elastic_icp_options = dynamic_cast<CeresElasticOdometry::Options &>(odometry_options);
+      prefix = "odometry_options.elastic.";
+
+      ROS2_PARAM_CLAUSE(node, ceres_elastic_icp_options, prefix, power_planarity, double);
+      ROS2_PARAM_CLAUSE(node, ceres_elastic_icp_options, prefix, beta_location_consistency, double);
+      ROS2_PARAM_CLAUSE(node, ceres_elastic_icp_options, prefix, beta_orientation_consistency, double);
+      ROS2_PARAM_CLAUSE(node, ceres_elastic_icp_options, prefix, beta_constant_velocity, double);
+      ROS2_PARAM_CLAUSE(node, ceres_elastic_icp_options, prefix, beta_small_velocity, double);
+      ROS2_PARAM_CLAUSE(node, ceres_elastic_icp_options, prefix, max_dist_to_plane, double);
+      std::string loss_function;
+      ROS2_PARAM(node, loss_function, prefix, loss_function, std::string);
+      if (loss_function == "L2")
+        ceres_elastic_icp_options.loss_function = CeresElasticOdometry::CERES_LOSS_FUNC::L2;
+      else if (loss_function == "CAUCHY")
+        ceres_elastic_icp_options.loss_function = CeresElasticOdometry::CERES_LOSS_FUNC::CAUCHY;
+      else if (loss_function == "HUBER")
+        ceres_elastic_icp_options.loss_function = CeresElasticOdometry::CERES_LOSS_FUNC::HUBER;
+      else if (loss_function == "TOLERANT")
+        ceres_elastic_icp_options.loss_function = CeresElasticOdometry::CERES_LOSS_FUNC::TOLERANT;
+      else {
+        LOG(WARNING) << "Parameter " << prefix + "loss_function"
+                     << " not specified. Using default value: "
+                     << "L2";
+      }
+      ROS2_PARAM_CLAUSE(node, ceres_elastic_icp_options, prefix, sigma, double);
+      ROS2_PARAM_CLAUSE(node, ceres_elastic_icp_options, prefix, tolerant_min_threshold, double);
+      ROS2_PARAM_CLAUSE(node, ceres_elastic_icp_options, prefix, max_iterations, int);
+      ROS2_PARAM_CLAUSE(node, ceres_elastic_icp_options, prefix, weight_alpha, double);
+      ROS2_PARAM_CLAUSE(node, ceres_elastic_icp_options, prefix, weight_neighborhood, double);
+      ROS2_PARAM_CLAUSE(node, ceres_elastic_icp_options, prefix, num_threads, int);
 
     } else if (options.odometry == "STEAM") {
       auto &steam_icp_options = dynamic_cast<SteamOdometry::Options &>(odometry_options);

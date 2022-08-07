@@ -14,6 +14,7 @@ find_package(ament_cmake REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(glog REQUIRED)
 find_package(tsl-robin-map REQUIRED CONFIG PATHS ${tessil_DIR} NO_DEFAULT_PATH)
+find_package(Ceres REQUIRED CONFIG PATHS ${Ceres_DIR} NO_DEFAULT_PATH)
 find_package(OpenMP REQUIRED)
 find_package(lgmath REQUIRED)
 find_package(steam REQUIRED)
@@ -34,7 +35,7 @@ include_directories(
 )
 
 link_libraries(
-  glog::glog Eigen3::Eigen tsl::robin_map OpenMP::OpenMP_CXX
+  glog::glog Eigen3::Eigen tsl::robin_map Ceres::ceres OpenMP::OpenMP_CXX
   lgmath steam
 )
 

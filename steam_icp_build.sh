@@ -105,4 +105,5 @@ colcon build --symlink-install \
 	-Dsteam_DIR=${STEAM_BUILD_DIR}/install/${BUILD_TYPE}/lib/cmake/steam \
 	-DEigen3_DIR=${EXT_BUILD_DIR}/install/${BUILD_TYPE}/Eigen3/share/eigen3/cmake \
 	-Dglog_DIR=${EXT_BUILD_DIR}/install/${BUILD_TYPE}/glog/lib/cmake/glog \
-	-Dtessil_DIR=${EXT_BUILD_DIR}/install/${BUILD_TYPE}/tessil/share/cmake/tsl-robin-map
+	-Dtessil_DIR=${EXT_BUILD_DIR}/install/${BUILD_TYPE}/tessil/share/cmake/tsl-robin-map \
+	-DCeres_DIR=${EXT_BUILD_DIR}/install/${BUILD_TYPE}/Ceres/lib/cmake/Ceres

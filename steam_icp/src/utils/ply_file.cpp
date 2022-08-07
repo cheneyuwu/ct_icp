@@ -147,6 +147,9 @@ void PlyFile::writeHeader() {
         _header += "int ";
         break;
       }
+      default: {
+        break;
+      }
     }
     _header += _propertyName[i];
     _header += "\n";
@@ -214,7 +217,6 @@ void PlyFile::writeFile(char* points, int numPoints, list<string> properties, li
 
   auto propIt = properties.begin();
   auto typesIt = types.begin();
-  int i = 0;
 
   for (int i(0); i < _propertyNum; i++) {
     _propertyName[i] = *propIt;

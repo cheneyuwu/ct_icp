@@ -652,13 +652,13 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
 
       const double weight = planarity_weight * planarity_weight;
 
-      Eigen::Vector3d closest_pt_normal = weight * normal;
+      Eigen::Vector3d closest_normal = weight * normal;
 
-      Eigen::Vector3d closest_point = vector_neighbors[0];
+      Eigen::Vector3d closest_pt = vector_neighbors[0];
 
-      double dist_to_plane = normal[0] * (pt_keypoint[0] - closest_point[0]) +
-                             normal[1] * (pt_keypoint[1] - closest_point[1]) +
-                             normal[2] * (pt_keypoint[2] - closest_point[2]);
+      double dist_to_plane = normal[0] * (pt_keypoint[0] - closest_pt[0]) +
+                             normal[1] * (pt_keypoint[1] - closest_pt[1]) +
+                             normal[2] * (pt_keypoint[2] - closest_pt[2]);
       dist_to_plane = std::abs(dist_to_plane);
 
       if (innerloop_time) inner_timer[1].second->stop();
@@ -671,17 +671,16 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
       if (use_p2p) {
         /// \note query and reference point
         ///   const auto qry_pt = keypoint.raw_pt;
-        ///   const auto ref_pt = closest_point;
+        ///   const auto ref_pt = closest_pt;
         if (options_.use_rv && options_.merge_p2p_rv) {
           Eigen::Matrix4d W = Eigen::Matrix4d::Identity();
-          W.block<3, 3>(0, 0) =
-              (closest_pt_normal * closest_pt_normal.transpose() + 1e-5 * Eigen::Matrix3d::Identity());
+          W.block<3, 3>(0, 0) = (closest_normal * closest_normal.transpose() + 1e-5 * Eigen::Matrix3d::Identity());
           W.block<1, 1>(3, 3) = options_.rv_cov_inv * Eigen::Matrix<double, 1, 1>::Identity();
           const auto noise_model = StaticNoiseModel<4>::MakeShared(W, NoiseType::INFORMATION);
 
           const auto &T_ms_intp_eval = T_ms_intp_eval_vec[i];
           const auto &w_ms_ins_intp_eval = w_ms_ins_intp_eval_vec[i];
-          const auto p2p_error = p2p::p2pError(T_ms_intp_eval, closest_point, keypoint.raw_pt);
+          const auto p2p_error = p2p::p2pError(T_ms_intp_eval, closest_pt, keypoint.raw_pt);
           const auto rv_error = p2p::radialVelError(w_ms_ins_intp_eval, keypoint.raw_pt, keypoint.radial_velocity);
           const auto error_func = p2p::p2prvError(p2p_error, rv_error);
 
@@ -697,11 +696,11 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
           }
 
         } else {
-          Eigen::Matrix3d W = (closest_pt_normal * closest_pt_normal.transpose() + 1e-5 * Eigen::Matrix3d::Identity());
+          Eigen::Matrix3d W = (closest_normal * closest_normal.transpose() + 1e-5 * Eigen::Matrix3d::Identity());
           const auto noise_model = StaticNoiseModel<3>::MakeShared(W, NoiseType::INFORMATION);
 
           const auto &T_ms_intp_eval = T_ms_intp_eval_vec[i];
-          const auto error_func = p2p::p2pError(T_ms_intp_eval, closest_point, keypoint.raw_pt);
+          const auto error_func = p2p::p2pError(T_ms_intp_eval, closest_pt, keypoint.raw_pt);
 
           const auto loss_func = [this]() -> BaseLossFunc::Ptr {
             switch (options_.p2p_loss_func) {

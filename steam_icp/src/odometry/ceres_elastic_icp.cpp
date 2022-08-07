@@ -1,8 +1,9 @@
-#include "steam_icp/odometry/elastic_icp.hpp"
+#include "steam_icp/odometry/ceres_elastic_icp.hpp"
 
 #include <iomanip>
 #include <random>
 
+#include <ceres/ceres.h>
 #include <glog/logging.h>
 
 #include "steam_icp/utils/stopwatch.hpp"
@@ -101,11 +102,242 @@ Neighborhood compute_neighborhood_distribution(const ArrayVector3d &points) {
   return neighborhood;
 }
 
+// A Const Functor for the Continuous time Point-to-Plane
+struct CTPointToPlaneFunctor {
+  static constexpr int NumResiduals() { return 1; }
+
+  CTPointToPlaneFunctor(const Eigen::Vector3d &reference_point, const Eigen::Vector3d &raw_target,
+                        const Eigen::Vector3d &reference_normal, double alpha_timestamp, double weight = 1.0)
+      : raw_keypoint_(raw_target),
+        reference_point_(reference_point),
+        reference_normal_(reference_normal),
+        alpha_timestamps_(alpha_timestamp),
+        weight_(weight) {}
+
+  template <typename T>
+  bool operator()(const T *const begin_rot_params, const T *begin_trans_params, const T *const end_rot_params,
+                  const T *end_trans_params, T *residual) const {
+    Eigen::Map<Eigen::Quaternion<T>> quat_begin(const_cast<T *>(begin_rot_params));
+    Eigen::Map<Eigen::Quaternion<T>> quat_end(const_cast<T *>(end_rot_params));
+    Eigen::Quaternion<T> quat_inter = quat_begin.slerp(T(alpha_timestamps_), quat_end);
+    quat_inter.normalize();
+
+    Eigen::Matrix<T, 3, 1> transformed = quat_inter * raw_keypoint_.template cast<T>();
+
+    T alpha_m = T(1.0 - alpha_timestamps_);
+    transformed(0, 0) += alpha_m * begin_trans_params[0] + alpha_timestamps_ * end_trans_params[0];
+    transformed(1, 0) += alpha_m * begin_trans_params[1] + alpha_timestamps_ * end_trans_params[1];
+    transformed(2, 0) += alpha_m * begin_trans_params[2] + alpha_timestamps_ * end_trans_params[2];
+
+    residual[0] = weight_ * (reference_point_.template cast<T>() - transformed).transpose() *
+                  reference_normal_.template cast<T>();
+
+    return true;
+  }
+
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+  Eigen::Vector3d raw_keypoint_;
+  Eigen::Vector3d reference_point_;
+  Eigen::Vector3d reference_normal_;
+  double alpha_timestamps_;
+  double weight_ = 1.0;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/// REGULARISATION COST FUNCTORS
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// A Const Functor which enforces Frame consistency between two poses
+struct LocationConsistencyFunctor {
+  static constexpr int NumResiduals() { return 3; }
+
+  LocationConsistencyFunctor(const Eigen::Vector3d &previous_location, double beta)
+      : previous_location_(previous_location), beta_(beta) {}
+
+  template <typename T>
+  bool operator()(const T *const location_params, T *residual) const {
+    residual[0] = beta_ * (location_params[0] - previous_location_(0, 0));
+    residual[1] = beta_ * (location_params[1] - previous_location_(1, 0));
+    residual[2] = beta_ * (location_params[2] - previous_location_(2, 0));
+    return true;
+  }
+
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+ private:
+  Eigen::Vector3d previous_location_;
+  double beta_ = 1.0;
+};
+
+// A Functor which enforces frame orientation consistency between two poses
+struct OrientationConsistencyFunctor {
+  static constexpr int NumResiduals() { return 1; }
+
+  OrientationConsistencyFunctor(const Eigen::Quaterniond &previous_orientation, double beta)
+      : previous_orientation_(previous_orientation), beta_(beta) {}
+
+  template <typename T>
+  bool operator()(const T *const orientation_params, T *residual) const {
+    Eigen::Quaternion<T> quat(orientation_params);
+    T scalar_quat = quat.dot(previous_orientation_.template cast<T>());
+    residual[0] = T(beta_) * (T(1.0) - scalar_quat * scalar_quat);
+    return true;
+  }
+
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+ private:
+  Eigen::Quaterniond previous_orientation_;
+  double beta_;
+};
+
+// A Const Functor which enforces a Constant Velocity constraint on translation
+struct ConstantVelocityFunctor {
+  static constexpr int NumResiduals() { return 3; }
+
+  ConstantVelocityFunctor(const Eigen::Vector3d &previous_velocity, double beta)
+      : previous_velocity_(previous_velocity), beta_(beta) {}
+
+  template <typename T>
+  bool operator()(const T *const begin_t, const T *const end_t, T *residual) const {
+    residual[0] = beta_ * (end_t[0] - begin_t[0] - previous_velocity_(0, 0));
+    residual[1] = beta_ * (end_t[1] - begin_t[1] - previous_velocity_(1, 0));
+    residual[2] = beta_ * (end_t[2] - begin_t[2] - previous_velocity_(2, 0));
+    return true;
+  }
+
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+ private:
+  Eigen::Vector3d previous_velocity_;
+  double beta_ = 1.0;
+};
+
+// A Const Functor which enforces a Small Velocity constraint
+struct SmallVelocityFunctor {
+  static constexpr int NumResiduals() { return 3; }
+
+  SmallVelocityFunctor(double beta) : beta_(beta){};
+
+  template <typename T>
+  bool operator()(const T *const begin_t, const T *const end_t, T *residual) const {
+    residual[0] = beta_ * (begin_t[0] - end_t[0]);
+    residual[1] = beta_ * (begin_t[1] - end_t[1]);
+    residual[2] = beta_ * (begin_t[2] - end_t[2]);
+    return true;
+  }
+
+  double beta_;
+};
+/* -------------------------------------------------------------------------------------------------------------- */
+// A Builder to abstract the different configurations of ICP optimization
+class ICPOptimizationBuilder {
+ public:
+  using CTICP_PointToPlaneResidual = ceres::AutoDiffCostFunction<CTPointToPlaneFunctor, 1, 4, 3, 4, 3>;
+
+  explicit ICPOptimizationBuilder(const CeresElasticOdometry::Options &options, const std::vector<Point3D> &points)
+      : options_(options), keypoints(points) {
+    corrected_raw_points_.reserve(keypoints.size());
+    for (const auto &point : keypoints) corrected_raw_points_.emplace_back(point.raw_pt);
+  }
+
+  bool InitProblem(int num_residuals) {
+    problem = std::make_unique<ceres::Problem>();
+    parameter_block_set_ = false;
+
+    // Select Loss function
+    switch (options_.loss_function) {
+      case CeresElasticOdometry::CERES_LOSS_FUNC::L2:
+        break;
+      case CeresElasticOdometry::CERES_LOSS_FUNC::CAUCHY:
+        loss_function = new ceres::CauchyLoss(options_.sigma);
+        break;
+      case CeresElasticOdometry::CERES_LOSS_FUNC::HUBER:
+        loss_function = new ceres::HuberLoss(options_.sigma);
+        break;
+      case CeresElasticOdometry::CERES_LOSS_FUNC::TOLERANT:
+        loss_function = new ceres::TolerantLoss(options_.tolerant_min_threshold, options_.sigma);
+        break;
+    }
+
+    // Resize the number of residuals
+    vector_ct_icp_residuals_.resize(num_residuals);
+    vector_cost_functors_.resize(num_residuals);
+    begin_quat_ = nullptr;
+    end_quat_ = nullptr;
+    begin_t_ = nullptr;
+    end_t_ = nullptr;
+
+    return true;
+  }
+
+  void AddParameterBlocks(Eigen::Quaterniond &begin_quat, Eigen::Quaterniond &end_quat, Eigen::Vector3d &begin_t,
+                          Eigen::Vector3d &end_t) {
+    if (parameter_block_set_) throw std::runtime_error{"The parameter block was already set"};
+    auto *parameterization = new ceres::EigenQuaternionParameterization();
+    begin_t_ = &begin_t.x();
+    end_t_ = &end_t.x();
+    begin_quat_ = &begin_quat.x();
+    end_quat_ = &end_quat.x();
+
+    problem->AddParameterBlock(begin_quat_, 4, parameterization);
+    problem->AddParameterBlock(end_quat_, 4, parameterization);
+    problem->AddParameterBlock(begin_t_, 3);
+    problem->AddParameterBlock(end_t_, 3);
+
+    parameter_block_set_ = true;
+  }
+
+  void SetResidualBlock(int keypoint_id, const Eigen::Vector3d &reference_point,
+                        const Eigen::Vector3d &reference_normal, double weight = 1.0, double alpha_timestamp = -1.0) {
+    if (alpha_timestamp < 0 || alpha_timestamp > 1) throw std::runtime_error("BAD ALPHA TIMESTAMP !");
+
+    CTPointToPlaneFunctor *ct_point_to_plane_functor = new CTPointToPlaneFunctor(
+        reference_point, corrected_raw_points_[keypoint_id], reference_normal, alpha_timestamp, weight);
+    void *cost_functor = ct_point_to_plane_functor;
+    void *cost_function = static_cast<void *>(new CTICP_PointToPlaneResidual(ct_point_to_plane_functor));
+
+    vector_ct_icp_residuals_[keypoint_id] = cost_function;
+    vector_cost_functors_[keypoint_id] = cost_functor;
+  }
+
+  std::unique_ptr<ceres::Problem> GetProblem() {
+    for (auto &pt_to_plane_residual : vector_ct_icp_residuals_) {
+      if (pt_to_plane_residual != nullptr) {
+        problem->AddResidualBlock(static_cast<CTICP_PointToPlaneResidual *>(pt_to_plane_residual), loss_function,
+                                  begin_quat_, begin_t_, end_quat_, end_t_);
+      }
+    }
+
+    std::fill(vector_cost_functors_.begin(), vector_cost_functors_.end(), nullptr);
+    std::fill(vector_ct_icp_residuals_.begin(), vector_ct_icp_residuals_.end(), nullptr);
+
+    return std::move(problem);
+  }
+
+ private:
+  const CeresElasticOdometry::Options &options_;
+  std::unique_ptr<ceres::Problem> problem = nullptr;
+
+  // Pointers managed by ceres
+  const std::vector<Point3D> &keypoints;
+  std::vector<Eigen::Vector3d> corrected_raw_points_;
+
+  // Parameters block pointers
+  bool parameter_block_set_ = false;
+  double *begin_quat_ = nullptr;
+  double *end_quat_ = nullptr;
+  double *begin_t_ = nullptr;
+  double *end_t_ = nullptr;
+
+  std::vector<void *> vector_cost_functors_;
+  std::vector<void *> vector_ct_icp_residuals_;
+  ceres::LossFunction *loss_function = nullptr;
+};
+
 }  // namespace
 
-ElasticOdometry::ElasticOdometry(const Options &options) : Odometry(options), options_(options) {}
+CeresElasticOdometry::CeresElasticOdometry(const Options &options) : Odometry(options), options_(options) {}
 
-ElasticOdometry::~ElasticOdometry() {
+CeresElasticOdometry::~CeresElasticOdometry() {
   std::ofstream trajectory_file;
   auto now = std::chrono::system_clock::now();
   auto utc = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
@@ -145,9 +377,9 @@ ElasticOdometry::~ElasticOdometry() {
   LOG(INFO) << "Dumping trajectory. - DONE" << std::endl;
 }
 
-Trajectory ElasticOdometry::trajectory() { return trajectory_; }
+Trajectory CeresElasticOdometry::trajectory() { return trajectory_; }
 
-auto ElasticOdometry::registerFrame(const std::vector<Point3D> &const_frame) -> RegistrationSummary {
+auto CeresElasticOdometry::registerFrame(const std::vector<Point3D> &const_frame) -> RegistrationSummary {
   RegistrationSummary summary;
 
   // add a new frame
@@ -207,7 +439,7 @@ auto ElasticOdometry::registerFrame(const std::vector<Point3D> &const_frame) -> 
   return summary;
 }
 
-void ElasticOdometry::initializeTimestamp(int index_frame, const std::vector<Point3D> &const_frame) {
+void CeresElasticOdometry::initializeTimestamp(int index_frame, const std::vector<Point3D> &const_frame) {
   double min_timestamp = std::numeric_limits<double>::max();
   double max_timestamp = std::numeric_limits<double>::min();
   for (const auto &point : const_frame) {
@@ -218,7 +450,7 @@ void ElasticOdometry::initializeTimestamp(int index_frame, const std::vector<Poi
   trajectory_[index_frame].end_timestamp = max_timestamp;
 }
 
-void ElasticOdometry::initializeMotion(int index_frame) {
+void CeresElasticOdometry::initializeMotion(int index_frame) {
   if (index_frame <= 1) {
     // Initialize first pose at Identity
     trajectory_[index_frame].begin_R = Eigen::MatrixXd::Identity(3, 3);
@@ -240,7 +472,7 @@ void ElasticOdometry::initializeMotion(int index_frame) {
   }
 }
 
-std::vector<Point3D> ElasticOdometry::initializeFrame(int index_frame, const std::vector<Point3D> &const_frame) {
+std::vector<Point3D> CeresElasticOdometry::initializeFrame(int index_frame, const std::vector<Point3D> &const_frame) {
   std::vector<Point3D> frame(const_frame);
 
   double sample_size = index_frame < options_.init_num_frames ? options_.init_voxel_size : options_.voxel_size;
@@ -273,7 +505,7 @@ std::vector<Point3D> ElasticOdometry::initializeFrame(int index_frame, const std
   return frame;
 }
 
-void ElasticOdometry::updateMap(int index_frame, int update_frame) {
+void CeresElasticOdometry::updateMap(int index_frame, int update_frame) {
   const double kSizeVoxelMap = options_.size_voxel_map;
   const double kMinDistancePoints = options_.min_distance_points;
   const int kMaxNumPointsInVoxel = options_.max_num_points_in_voxel;
@@ -303,7 +535,7 @@ void ElasticOdometry::updateMap(int index_frame, int update_frame) {
   map_.remove(location, kMaxDistance);
 }
 
-bool ElasticOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
+bool CeresElasticOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
   bool icp_success = true;
 
   // For the 50 first frames, visit 2 voxels
@@ -311,14 +543,21 @@ bool ElasticOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
   const double kMaxPointToPlane = options_.max_dist_to_plane;
   const int kMinNumNeighbors = options_.min_number_neighbors;
 
-  using AType = Eigen::Matrix<double, 12, 12>;
-  using bType = Eigen::Matrix<double, 12, 1>;
-  AType A;
-  bType b;
+  ceres::Solver::Options ceres_options;
+  ceres_options.max_num_iterations = options_.max_iterations;
+  ceres_options.num_threads = options_.num_threads;
+  ceres_options.trust_region_strategy_type = ceres::TrustRegionStrategyType::LEVENBERG_MARQUARDT;
+  ICPOptimizationBuilder builder(options_, keypoints);
 
   const auto &previous_estimate = trajectory_.at(index_frame - 1);
+  const Eigen::Vector3d previous_velocity = previous_estimate.end_t - previous_estimate.begin_t;
+  const Eigen::Quaterniond previous_orientation = Eigen::Quaterniond(previous_estimate.end_R);
 
   auto &current_estimate = trajectory_.at(index_frame);
+  Eigen::Quaterniond begin_quat = Eigen::Quaterniond(current_estimate.begin_R);
+  Eigen::Quaterniond end_quat = Eigen::Quaterniond(current_estimate.end_R);
+  Eigen::Vector3d begin_t = current_estimate.begin_t;
+  Eigen::Vector3d end_t = current_estimate.end_t;
 
   // timers
   std::vector<std::pair<std::string, std::unique_ptr<Stopwatch<>>>> timer;
@@ -338,10 +577,6 @@ bool ElasticOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
 #pragma omp parallel for num_threads(options_.num_threads)
     for (auto &keypoint : keypoints) {
       const double &alpha_timestamp = keypoint.alpha_timestamp;
-      Eigen::Quaterniond begin_quat = Eigen::Quaterniond(current_estimate.begin_R);
-      Eigen::Quaterniond end_quat = Eigen::Quaterniond(current_estimate.end_R);
-      Eigen::Vector3d begin_t = current_estimate.begin_t;
-      Eigen::Vector3d end_t = current_estimate.end_t;
       Eigen::Quaterniond q = begin_quat.slerp(alpha_timestamp, end_quat);
       q.normalize();
       Eigen::Matrix3d R = q.toRotationMatrix();
@@ -350,11 +585,18 @@ bool ElasticOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
     }
   };
 
+  double lambda_weight = std::abs(options_.weight_alpha);
+  double lambda_neighborhood = std::abs(options_.weight_neighborhood);
+  const double sum = lambda_weight + lambda_neighborhood;
+  if (sum <= 0.0) throw std::runtime_error("sum of lambda_weight and lambda_neighborhood must be positive");
+  lambda_weight /= sum;
+  lambda_neighborhood /= sum;
+
   //
   int num_iter_icp = index_frame < options_.init_num_frames ? 15 : options_.num_iters_icp;
   for (int iter(0); iter < num_iter_icp; iter++) {
-    A = Eigen::MatrixXd::Zero(12, 12);
-    b = Eigen::VectorXd::Zero(12);
+    builder.InitProblem(keypoints.size());
+    builder.AddParameterBlocks(begin_quat, end_quat, begin_t, end_t);
 
     number_keypoints_used = 0;
 
@@ -392,7 +634,9 @@ bool ElasticOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
       }
 
       const double planarity_weight = std::pow(neighborhood.a2D, options_.power_planarity);
-      const double weight = planarity_weight;
+      const double weight = lambda_weight * planarity_weight +
+                            lambda_neighborhood * std::exp(-(vector_neighbors[0] - pt_keypoint).norm() /
+                                                           (kMaxPointToPlane * kMinNumNeighbors));
 
       if (innerloop_time) inner_timer[1].second->stop();
 
@@ -400,52 +644,9 @@ bool ElasticOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
 
       const double dist_to_plane = std::abs((keypoint.pt - vector_neighbors[0]).transpose() * neighborhood.normal);
       if (dist_to_plane < kMaxPointToPlane) {
-        Eigen::Vector3d closest_pt = vector_neighbors[0];
-        Eigen::Vector3d closest_normal = weight * neighborhood.normal;
-
-        double scalar = closest_normal[0] * (pt_keypoint[0] - closest_pt[0]) +
-                        closest_normal[1] * (pt_keypoint[1] - closest_pt[1]) +
-                        closest_normal[2] * (pt_keypoint[2] - closest_pt[2]);
-
-        Eigen::Vector3d frame_idx_previous_origin_begin = current_estimate.begin_R * keypoint.raw_pt;
-        Eigen::Vector3d frame_idx_previous_origin_end = current_estimate.end_R * keypoint.raw_pt;
-
-        double cbx = (1 - alpha_timestamp) * (frame_idx_previous_origin_begin[1] * closest_normal[2] -
-                                              frame_idx_previous_origin_begin[2] * closest_normal[1]);
-        double cby = (1 - alpha_timestamp) * (frame_idx_previous_origin_begin[2] * closest_normal[0] -
-                                              frame_idx_previous_origin_begin[0] * closest_normal[2]);
-        double cbz = (1 - alpha_timestamp) * (frame_idx_previous_origin_begin[0] * closest_normal[1] -
-                                              frame_idx_previous_origin_begin[1] * closest_normal[0]);
-
-        double nbx = (1 - alpha_timestamp) * closest_normal[0];
-        double nby = (1 - alpha_timestamp) * closest_normal[1];
-        double nbz = (1 - alpha_timestamp) * closest_normal[2];
-
-        double cex = (alpha_timestamp) * (frame_idx_previous_origin_end[1] * closest_normal[2] -
-                                          frame_idx_previous_origin_end[2] * closest_normal[1]);
-        double cey = (alpha_timestamp) * (frame_idx_previous_origin_end[2] * closest_normal[0] -
-                                          frame_idx_previous_origin_end[0] * closest_normal[2]);
-        double cez = (alpha_timestamp) * (frame_idx_previous_origin_end[0] * closest_normal[1] -
-                                          frame_idx_previous_origin_end[1] * closest_normal[0]);
-
-        double nex = (alpha_timestamp)*closest_normal[0];
-        double ney = (alpha_timestamp)*closest_normal[1];
-        double nez = (alpha_timestamp)*closest_normal[2];
-
-        Eigen::VectorXd u(12);
-        u << cbx, cby, cbz, nbx, nby, nbz, cex, cey, cez, nex, ney, nez;
-
+        builder.SetResidualBlock(i, vector_neighbors[0], neighborhood.normal, weight, alpha_timestamp);
 #pragma omp critical(odometry_cost_term)
-        {
-          for (int i = 0; i < 12; i++) {
-            for (int j = 0; j < 12; j++) {
-              A(i, j) = A(i, j) + u[i] * u[j];
-            }
-            b(i) = b(i) - u[i] * scalar;
-          }
-
-          number_keypoints_used++;
-        }
+        { number_keypoints_used++; }
       }
 
       if (innerloop_time) inner_timer[2].second->stop();
@@ -462,81 +663,68 @@ bool ElasticOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
 
     timer[2].second->start();
 
-    // Normalize equation
-    for (int i(0); i < 12; i++) {
-      for (int j(0); j < 12; j++) {
-        A(i, j) = A(i, j) / number_keypoints_used;
-      }
-      b(i) = b(i) / number_keypoints_used;
-    }
+    auto problem = builder.GetProblem();
 
     // Add constraints in trajectory
     if (index_frame > 1)  // no constraints for frame_index == 1
     {
-      Eigen::Vector3d diff_traj = current_estimate.begin_t - previous_estimate.end_t;
-      A(3, 3) = A(3, 3) + options_.beta_location_consistency;
-      A(4, 4) = A(4, 4) + options_.beta_location_consistency;
-      A(5, 5) = A(5, 5) + options_.beta_location_consistency;
-      b(3) = b(3) - options_.beta_location_consistency * diff_traj(0);
-      b(4) = b(4) - options_.beta_location_consistency * diff_traj(1);
-      b(5) = b(5) - options_.beta_location_consistency * diff_traj(2);
+      // Add Regularisation residuals
+      problem->AddResidualBlock(
+          new ceres::AutoDiffCostFunction<LocationConsistencyFunctor, LocationConsistencyFunctor::NumResiduals(), 3>(
+              new LocationConsistencyFunctor(previous_estimate.end_t,
+                                             std::sqrt(number_keypoints_used * options_.beta_location_consistency))),
+          nullptr, &begin_t.x());
+      problem->AddResidualBlock(
+          new ceres::AutoDiffCostFunction<ConstantVelocityFunctor, ConstantVelocityFunctor::NumResiduals(), 3, 3>(
+              new ConstantVelocityFunctor(previous_velocity,
+                                          std::sqrt(number_keypoints_used * options_.beta_constant_velocity))),
+          nullptr, &begin_t.x(), &end_t.x());
 
-      Eigen::Vector3d diff_ego =
-          current_estimate.end_t - current_estimate.begin_t - previous_estimate.end_t + previous_estimate.begin_t;
-      A(9, 9) = A(9, 9) + options_.beta_constant_velocity;
-      A(10, 10) = A(10, 10) + options_.beta_constant_velocity;
-      A(11, 11) = A(11, 11) + options_.beta_constant_velocity;
-      b(9) = b(9) - options_.beta_constant_velocity * diff_ego(0);
-      b(10) = b(10) - options_.beta_constant_velocity * diff_ego(1);
-      b(11) = b(11) - options_.beta_constant_velocity * diff_ego(2);
+      // SMALL VELOCITY
+      problem->AddResidualBlock(
+          new ceres::AutoDiffCostFunction<SmallVelocityFunctor, SmallVelocityFunctor::NumResiduals(), 3, 3>(
+              new SmallVelocityFunctor(std::sqrt(number_keypoints_used * options_.beta_small_velocity))),
+          nullptr, &begin_t.x(), &end_t.x());
+
+      // ORIENTATION CONSISTENCY
+      problem->AddResidualBlock(
+          new ceres::AutoDiffCostFunction<OrientationConsistencyFunctor, OrientationConsistencyFunctor::NumResiduals(),
+                                          4>(new OrientationConsistencyFunctor(
+              previous_orientation, sqrt(number_keypoints_used * options_.beta_orientation_consistency))),
+          nullptr, &begin_quat.x());
     }
 
-    // Solve
-    Eigen::VectorXd x_bundle = A.ldlt().solve(b);
-
-    double alpha_begin = x_bundle(0);
-    double beta_begin = x_bundle(1);
-    double gamma_begin = x_bundle(2);
-    Eigen::Matrix3d rotation_begin;
-    rotation_begin(0, 0) = cos(gamma_begin) * cos(beta_begin);
-    rotation_begin(0, 1) = -sin(gamma_begin) * cos(alpha_begin) + cos(gamma_begin) * sin(beta_begin) * sin(alpha_begin);
-    rotation_begin(0, 2) = sin(gamma_begin) * sin(alpha_begin) + cos(gamma_begin) * sin(beta_begin) * cos(alpha_begin);
-    rotation_begin(1, 0) = sin(gamma_begin) * cos(beta_begin);
-    rotation_begin(1, 1) = cos(gamma_begin) * cos(alpha_begin) + sin(gamma_begin) * sin(beta_begin) * sin(alpha_begin);
-    rotation_begin(1, 2) = -cos(gamma_begin) * sin(alpha_begin) + sin(gamma_begin) * sin(beta_begin) * cos(alpha_begin);
-    rotation_begin(2, 0) = -sin(beta_begin);
-    rotation_begin(2, 1) = cos(beta_begin) * sin(alpha_begin);
-    rotation_begin(2, 2) = cos(beta_begin) * cos(alpha_begin);
-    Eigen::Vector3d translation_begin = Eigen::Vector3d(x_bundle(3), x_bundle(4), x_bundle(5));
-
-    double alpha_end = x_bundle(6);
-    double beta_end = x_bundle(7);
-    double gamma_end = x_bundle(8);
-    Eigen::Matrix3d rotation_end;
-    rotation_end(0, 0) = cos(gamma_end) * cos(beta_end);
-    rotation_end(0, 1) = -sin(gamma_end) * cos(alpha_end) + cos(gamma_end) * sin(beta_end) * sin(alpha_end);
-    rotation_end(0, 2) = sin(gamma_end) * sin(alpha_end) + cos(gamma_end) * sin(beta_end) * cos(alpha_end);
-    rotation_end(1, 0) = sin(gamma_end) * cos(beta_end);
-    rotation_end(1, 1) = cos(gamma_end) * cos(alpha_end) + sin(gamma_end) * sin(beta_end) * sin(alpha_end);
-    rotation_end(1, 2) = -cos(gamma_end) * sin(alpha_end) + sin(gamma_end) * sin(beta_end) * cos(alpha_end);
-    rotation_end(2, 0) = -sin(beta_end);
-    rotation_end(2, 1) = cos(beta_end) * sin(alpha_end);
-    rotation_end(2, 2) = cos(beta_end) * cos(alpha_end);
-    Eigen::Vector3d translation_end = Eigen::Vector3d(x_bundle(9), x_bundle(10), x_bundle(11));
+    ceres::Solver::Summary summary;
+    ceres::Solve(ceres_options, problem.get(), &summary);
+    if (!summary.IsSolutionUsable()) {
+      std::cout << summary.FullReport() << std::endl;
+      throw std::runtime_error("Error During Optimization");
+    }
+    if (options_.debug_print) {
+      std::cout << summary.BriefReport() << std::endl;
+    }
 
     timer[2].second->stop();
 
     timer[3].second->start();
 
     // Update (changes trajectory data)
-    current_estimate.begin_R = rotation_begin * current_estimate.begin_R;
-    current_estimate.begin_t = current_estimate.begin_t + translation_begin;
-    current_estimate.end_R = rotation_end * current_estimate.end_R;
-    current_estimate.end_t = current_estimate.end_t + translation_end;
+    begin_quat.normalize();
+    end_quat.normalize();
+
+    double diff_trans = (current_estimate.begin_t - begin_t).norm() + (current_estimate.end_t - end_t).norm();
+    double diff_rot = AngularDistance(current_estimate.begin_R, begin_quat.toRotationMatrix()) +
+                      AngularDistance(current_estimate.end_R, end_quat.toRotationMatrix());
+
+    current_estimate.begin_R = begin_quat.toRotationMatrix();
+    current_estimate.begin_t = begin_t;
+    current_estimate.end_R = end_quat.toRotationMatrix();
+    current_estimate.end_t = end_t;
 
     timer[3].second->stop();
 
-    if ((index_frame > 1) && (x_bundle.norm() < options_.convergence_threshold)) {
+    if ((index_frame > 1) &&
+        (diff_rot < options_.threshold_orientation_norm && diff_trans < options_.threshold_translation_norm)) {
       if (options_.debug_print) {
         LOG(INFO) << "CT_ICP: Finished with N=" << iter << " ICP iterations" << std::endl;
       }
