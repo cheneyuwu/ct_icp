@@ -71,7 +71,7 @@
 
         use_rv: false
         merge_p2p_rv: false
-        rv_cov_inv: 0.05
+        rv_cov_inv: 0.1
         rv_loss_threshold: 0.05
 
         verbose: false
