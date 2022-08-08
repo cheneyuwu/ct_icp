@@ -95,7 +95,7 @@ void computeMeanRPE(const ArrayPoses &poses_gt, const ArrayPoses &poses_result, 
 }  // namespace
 
 Sequence::SeqError evaluateOdometry(const std::string &filename, const ArrayPoses &poses_gt,
-                                    const ArrayPoses &poses_estimated) {
+                                    const ArrayPoses &poses_est) {
   std::ofstream errorfile(filename);
   if (!errorfile.is_open()) throw std::runtime_error{"failed to open file: " + filename};
   errorfile << std::setprecision(std::numeric_limits<long double>::digits10 + 1);
@@ -106,7 +106,7 @@ Sequence::SeqError evaluateOdometry(const std::string &filename, const ArrayPose
   seq_err.mean_ape = 0.0;
   seq_err.max_ape = 0.0;
   for (size_t i = 0; i < poses_gt.size(); i++) {
-    double t_ape_err = translationError(poses_estimated[i].inverse() * poses_gt[0].inverse() * poses_gt[i]);
+    double t_ape_err = translationError(poses_est[i].inverse() * poses_gt[0].inverse() * poses_gt[i]);
     seq_err.mean_ape += t_ape_err;
     if (seq_err.max_ape < t_ape_err) {
       seq_err.max_ape = t_ape_err;
@@ -119,12 +119,15 @@ Sequence::SeqError evaluateOdometry(const std::string &filename, const ArrayPose
   seq_err.max_local_err = 0.0;
   seq_err.index_max_local_err = 0;
   for (int i = 1; i < (int)poses_gt.size(); i++) {
+    Eigen::Matrix4d t_local = poses_gt[i].inverse() * poses_gt[i - 1] * poses_est[i - 1].inverse() * poses_est[i];
+    const auto t_local_vec = lgmath::se3::tran2vec(t_local);
+
     double gt_local_norm_2d = (poses_gt[i].block<2, 1>(0, 3) - poses_gt[i - 1].block<2, 1>(0, 3)).norm();
-    double est_local_norm_2d = (poses_estimated[i].block<2, 1>(0, 3) - poses_estimated[i - 1].block<2, 1>(0, 3)).norm();
+    double est_local_norm_2d = (poses_est[i].block<2, 1>(0, 3) - poses_est[i - 1].block<2, 1>(0, 3)).norm();
     double t_local_err_2d = gt_local_norm_2d - est_local_norm_2d;
 
     double gt_local_norm = (poses_gt[i].block<3, 1>(0, 3) - poses_gt[i - 1].block<3, 1>(0, 3)).norm();
-    double est_local_norm = (poses_estimated[i].block<3, 1>(0, 3) - poses_estimated[i - 1].block<3, 1>(0, 3)).norm();
+    double est_local_norm = (poses_est[i].block<3, 1>(0, 3) - poses_est[i - 1].block<3, 1>(0, 3)).norm();
     double t_local_err = gt_local_norm - est_local_norm;
 
     double abs_t_local_err = fabs(t_local_err);
@@ -134,12 +137,12 @@ Sequence::SeqError evaluateOdometry(const std::string &filename, const ArrayPose
       seq_err.index_max_local_err = i;
     }
 
-    errorfile << t_local_err_2d << " " << t_local_err << std::endl;
+    errorfile << t_local_err_2d << " " << t_local_err << " " << t_local_vec.transpose() << std::endl;
   }
   seq_err.mean_local_err /= static_cast<double>(poses_gt.size() - 1);
 
   // Compute sequence mean RPE errors
-  computeMeanRPE(poses_gt, poses_estimated, seq_err);
+  computeMeanRPE(poses_gt, poses_est, seq_err);
 
   return seq_err;
 }

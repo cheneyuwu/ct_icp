@@ -160,11 +160,7 @@ std::vector<Point3D> DICPSequence::next() {
 
 void DICPSequence::save(const std::string &path, const Trajectory &trajectory) const {
   //
-  ArrayPoses poses;
-  poses.reserve(trajectory.size());
-  for (auto &frame : trajectory) {
-    poses.emplace_back(frame.getMidPose());
-  }
+  const auto poses = transformTrajectory(trajectory);
 
   //
   const auto filename = path + "/" + options_.sequence + "_poses.txt";
