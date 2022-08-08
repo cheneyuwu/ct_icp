@@ -59,6 +59,7 @@
         no_prev_state_iters: 10
         association_after_adding_prev_state: false
 
+        power_planarity: 2.0
         p2p_initial_iters: 0
         p2p_initial_max_dist: 0.5
         p2p_refined_max_dist: 0.5

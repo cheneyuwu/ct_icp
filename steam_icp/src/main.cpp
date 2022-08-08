@@ -288,6 +288,7 @@ steam_icp::SLAMOptions loadOptions(const rclcpp::Node::SharedPtr &node) {
       LOG(WARNING) << "Parameter " << prefix + "vp_cov_diag"
                    << " = " << steam_icp_options.vp_cov.diagonal().transpose() << std::endl;
 
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, power_planarity, double);
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, p2p_initial_iters, int);
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, p2p_initial_max_dist, double);
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, p2p_refined_max_dist, double);
@@ -363,6 +364,7 @@ steam_icp::SLAMOptions loadOptions(const rclcpp::Node::SharedPtr &node) {
       LOG(WARNING) << "Parameter " << prefix + "vp_cov_diag"
                    << " = " << steam_icp_options.vp_cov.diagonal().transpose() << std::endl;
 
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, power_planarity, double);
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, p2p_initial_iters, int);
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, p2p_initial_max_dist, double);
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, p2p_refined_max_dist, double);

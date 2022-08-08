@@ -31,6 +31,7 @@ class SteamOdometry : public Odometry {
     bool use_vp = false;
     Eigen::Matrix<double, 6, 6> vp_cov = Eigen::Matrix<double, 6, 6>::Identity();
     // p2p
+    double power_planarity = 2.0;
     int p2p_initial_iters = 0;
     double p2p_initial_max_dist = 0.3;
     double p2p_refined_max_dist = 0.3;

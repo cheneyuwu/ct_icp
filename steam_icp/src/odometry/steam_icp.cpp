@@ -180,14 +180,15 @@ SteamOdometry::~SteamOdometry() {
     //
     const auto T_rm = full_trajectory->getPoseInterpolator(steam_time)->evaluate().matrix();
     const auto w_mr_inr = full_trajectory->getVelocityInterpolator(steam_time)->evaluate();
-    //
-    trajectory_file << (0.0) << " " << steam_time.nanosecs() << " ";
-    trajectory_file << T_rm(0, 0) << " " << T_rm(0, 1) << " " << T_rm(0, 2) << " " << T_rm(0, 3) << " ";
-    trajectory_file << T_rm(1, 0) << " " << T_rm(1, 1) << " " << T_rm(1, 2) << " " << T_rm(1, 3) << " ";
-    trajectory_file << T_rm(2, 0) << " " << T_rm(2, 1) << " " << T_rm(2, 2) << " " << T_rm(2, 3) << " ";
-    trajectory_file << T_rm(3, 0) << " " << T_rm(3, 1) << " " << T_rm(3, 2) << " " << T_rm(3, 3) << " ";
-    trajectory_file << w_mr_inr(0) << " " << w_mr_inr(1) << " " << w_mr_inr(2) << " " << w_mr_inr(3) << " ";
-    trajectory_file << w_mr_inr(4) << " " << w_mr_inr(5) << std::endl;
+    // clang-format off
+    trajectory_file << std::fixed << std::setprecision(12) << (0.0) << " " << steam_time.nanosecs() << " "
+                    << T_rm(0, 0) << " " << T_rm(0, 1) << " " << T_rm(0, 2) << " " << T_rm(0, 3) << " "
+                    << T_rm(1, 0) << " " << T_rm(1, 1) << " " << T_rm(1, 2) << " " << T_rm(1, 3) << " "
+                    << T_rm(2, 0) << " " << T_rm(2, 1) << " " << T_rm(2, 2) << " " << T_rm(2, 3) << " "
+                    << T_rm(3, 0) << " " << T_rm(3, 1) << " " << T_rm(3, 2) << " " << T_rm(3, 3) << " "
+                    << w_mr_inr(0) << " " << w_mr_inr(1) << " " << w_mr_inr(2) << " " << w_mr_inr(3) << " "
+                    << w_mr_inr(4) << " " << w_mr_inr(5) << std::endl;
+    // clang-format on
   }
   LOG(INFO) << "Dumping trajectory. - DONE" << std::endl;
 }
@@ -345,6 +346,7 @@ void SteamOdometry::initializeMotion(int index_frame) {
 
 std::vector<Point3D> SteamOdometry::initializeFrame(int index_frame, const std::vector<Point3D> &const_frame) {
   std::vector<Point3D> frame(const_frame);
+
   double sample_size = index_frame < options_.init_num_frames ? options_.init_voxel_size : options_.voxel_size;
   std::mt19937_64 g;
   std::shuffle(frame.begin(), frame.end(), g);
@@ -512,32 +514,36 @@ bool SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
     w_ms_ins_intp_eval_vec.emplace_back(w_ms_ins_intp_eval);
   }
 
-  // Initialize keypoints
-#pragma omp parallel for num_threads(options_.num_threads)
-  for (int i = 0; i < (int)keypoints.size(); i++) {
-    auto &keypoint = keypoints[i];
-    const auto &T_ms_intp_eval = T_ms_intp_eval_vec[i];
-
-    const auto T_ms = T_ms_intp_eval->evaluate().matrix();
-    keypoint.pt = T_ms.block<3, 3>(0, 0) * keypoint.raw_pt + T_ms.block<3, 1>(0, 3);
-  }
-
   // For the 50 first frames, visit 2 voxels
   const short nb_voxels_visited = index_frame < options_.init_num_frames ? 2 : 1;
-  int number_keypoints_used = 0;
   const int kMinNumNeighbors = options_.min_number_neighbors;
+
+  auto &current_estimate = trajectory_.at(index_frame);
 
   // timers
   std::vector<std::pair<std::string, std::unique_ptr<Stopwatch<>>>> timer;
+  timer.emplace_back("Update Transform ............... ", std::make_unique<Stopwatch<>>(false));
   timer.emplace_back("Association .................... ", std::make_unique<Stopwatch<>>(false));
   timer.emplace_back("Optimization ................... ", std::make_unique<Stopwatch<>>(false));
-  timer.emplace_back("Update Transform ............... ", std::make_unique<Stopwatch<>>(false));
   timer.emplace_back("Alignment ...................... ", std::make_unique<Stopwatch<>>(false));
   std::vector<std::pair<std::string, std::unique_ptr<Stopwatch<>>>> inner_timer;
   inner_timer.emplace_back("Search Neighbors ............. ", std::make_unique<Stopwatch<>>(false));
   inner_timer.emplace_back("Compute Normal ............... ", std::make_unique<Stopwatch<>>(false));
   inner_timer.emplace_back("Add Cost Term ................ ", std::make_unique<Stopwatch<>>(false));
   bool innerloop_time = (options_.num_threads == 1);
+
+  int number_keypoints_used = 0;
+
+  auto transform_keypoints = [&]() {
+#pragma omp parallel for num_threads(options_.num_threads)
+    for (int i = 0; i < (int)keypoints.size(); i++) {
+      auto &keypoint = keypoints[i];
+      const auto &T_ms_intp_eval = T_ms_intp_eval_vec[i];
+
+      const auto T_ms = T_ms_intp_eval->evaluate().matrix();
+      keypoint.pt = T_ms.block<3, 3>(0, 0) * keypoint.raw_pt + T_ms.block<3, 1>(0, 3);
+    }
+  };
 
   //
   int num_iter_icp = index_frame < options_.init_num_frames ? 15 : options_.num_iters_icp;
@@ -574,6 +580,10 @@ bool SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
 #endif
     number_keypoints_used = 0;
 
+    timer[0].second->start();
+    transform_keypoints();
+    timer[0].second->stop();
+
     // initialize problem
     OptimizationProblem problem(/* num_threads */ options_.num_threads);
 
@@ -584,10 +594,10 @@ bool SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
     steam_trajectory->addPriorCostTerms(problem);
     for (const auto &prior_cost_term : prior_cost_terms) problem.addCostTerm(prior_cost_term);
 
-    timer[0].second->start();
-
     meas_cost_terms.clear();
     meas_cost_terms.reserve(keypoints.size());
+
+    timer[1].second->start();
 
 #pragma omp parallel for num_threads(options_.num_threads)
     for (int i = 0; i < (int)keypoints.size(); i++) {
@@ -609,29 +619,22 @@ bool SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
       if (innerloop_time) inner_timer[1].second->start();
 
       // Compute normals from neighbors
-      const auto neighborhood = compute_neighborhood_distribution(vector_neighbors);
-      const double planarity_weight = neighborhood.a2D;
-      const auto &normal = neighborhood.normal;
+      auto neighborhood = compute_neighborhood_distribution(vector_neighbors);
 
-      const double weight = planarity_weight * planarity_weight;
-
-      Eigen::Vector3d closest_normal = weight * normal;
-
-      Eigen::Vector3d closest_pt = vector_neighbors[0];
-
-      double dist_to_plane = normal[0] * (pt_keypoint[0] - closest_pt[0]) +
-                             normal[1] * (pt_keypoint[1] - closest_pt[1]) +
-                             normal[2] * (pt_keypoint[2] - closest_pt[2]);
-      dist_to_plane = std::abs(dist_to_plane);
+      const double planarity_weight = std::pow(neighborhood.a2D, options_.power_planarity);
+      const double weight = planarity_weight;
 
       if (innerloop_time) inner_timer[1].second->stop();
 
       if (innerloop_time) inner_timer[2].second->start();
 
+      const double dist_to_plane = std::abs((keypoint.pt - vector_neighbors[0]).transpose() * neighborhood.normal);
       double max_dist_to_plane =
           (iter >= options_.p2p_initial_iters ? options_.p2p_refined_max_dist : options_.p2p_initial_max_dist);
       bool use_p2p = (dist_to_plane < max_dist_to_plane);
       if (use_p2p) {
+        Eigen::Vector3d closest_pt = vector_neighbors[0];
+        Eigen::Vector3d closest_normal = weight * neighborhood.normal;
         /// \note query and reference point
         ///   const auto qry_pt = keypoint.raw_pt;
         ///   const auto ref_pt = closest_pt;
@@ -711,7 +714,7 @@ bool SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
 
     for (const auto &cost : meas_cost_terms) problem.addCostTerm(cost);
 
-    timer[0].second->stop();
+    timer[1].second->stop();
 
     if (number_keypoints_used < 100) {
       LOG(ERROR) << "[CT_ICP]Error : not enough keypoints selected in ct-icp !" << std::endl;
@@ -720,7 +723,7 @@ bool SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
       break;
     }
 
-    timer[1].second->start();
+    timer[2].second->start();
 
     // Solve
     GaussNewtonSolver::Params params;
@@ -735,28 +738,27 @@ bool SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
     solver.optimize();
     Covariance covariance(solver);
 
-    timer[1].second->stop();
+    timer[2].second->stop();
 
-    timer[2].second->start();
+    timer[3].second->start();
 
     // Update (changes trajectory data)
     double diff_trans = 0, diff_rot = 0;
-
-    auto &current_estimate = trajectory_[index_frame];
 
     Time begin_steam_time(static_cast<double>(trajectory_[index_frame].begin_timestamp));
     const auto begin_T_mr = inverse(steam_trajectory->getPoseInterpolator(begin_steam_time))->evaluate().matrix();
     const auto begin_T_ms = begin_T_mr * options_.T_sr.inverse();
     diff_trans += (current_estimate.begin_t - begin_T_ms.block<3, 1>(0, 3)).norm();
     diff_rot += AngularDistance(current_estimate.begin_R, begin_T_ms.block<3, 3>(0, 0));
-    current_estimate.begin_R = begin_T_ms.block<3, 3>(0, 0);
-    current_estimate.begin_t = begin_T_ms.block<3, 1>(0, 3);
 
     Time end_steam_time(static_cast<double>(trajectory_[index_frame].end_timestamp));
     const auto end_T_mr = inverse(steam_trajectory->getPoseInterpolator(end_steam_time))->evaluate().matrix();
     const auto end_T_ms = end_T_mr * options_.T_sr.inverse();
     diff_trans += (current_estimate.end_t - end_T_ms.block<3, 1>(0, 3)).norm();
     diff_rot += AngularDistance(current_estimate.end_R, end_T_ms.block<3, 3>(0, 0));
+
+    current_estimate.begin_R = begin_T_ms.block<3, 3>(0, 0);
+    current_estimate.begin_t = begin_T_ms.block<3, 1>(0, 3);
     current_estimate.end_R = end_T_ms.block<3, 3>(0, 0);
     current_estimate.end_t = end_T_ms.block<3, 1>(0, 3);
 
@@ -764,20 +766,6 @@ bool SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
     current_estimate.end_T_rm_cov = curr_end_state_cov.block<6, 6>(0, 0);
     current_estimate.end_w_mr_inr_cov = curr_end_state_cov.block<6, 6>(6, 6);
     current_estimate.end_state_cov = curr_end_state_cov;
-
-    timer[2].second->stop();
-
-    timer[3].second->start();
-
-    // Update keypoints
-#pragma omp parallel for num_threads(options_.num_threads)
-    for (int i = 0; i < (int)keypoints.size(); i++) {
-      auto &keypoint = keypoints[i];
-      const auto &T_ms_intp_eval = T_ms_intp_eval_vec[i];
-
-      const auto T_ms = T_ms_intp_eval->evaluate().matrix();
-      keypoint.pt = T_ms.block<3, 3>(0, 0) * keypoint.raw_pt + T_ms.block<3, 1>(0, 3);
-    }
 
     timer[3].second->stop();
 
@@ -796,6 +784,11 @@ bool SteamOdometry::icp(int index_frame, std::vector<Point3D> &keypoints) {
     if (options_.add_prev_state && ready_to_add_prev_state == 2 && (!options_.association_after_adding_prev_state))
       break;
   }
+
+  timer[0].second->start();
+  transform_keypoints();
+  timer[0].second->stop();
+
   LOG(INFO) << "Number of keypoints used in CT-ICP : " << number_keypoints_used << std::endl;
 
   /// Debug print
