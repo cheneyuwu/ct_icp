@@ -43,5 +43,5 @@ python -m pyboreas.eval.odometry_aeva --gt ${DATASET_DIR} --pred ${RESULT_DIR}/b
 ## Visualize a path
 source ${WORKING_DIR}/venv/bin/activate
 source /opt/ros/galactic/setup.bash
-cd ${WORKING_DIR}/ros2/ct_icp_slam/script
+cd ${WORKING_DIR}/steam_icp/script
 python plot_boreas_poses_rviz.py # modify directory inside
