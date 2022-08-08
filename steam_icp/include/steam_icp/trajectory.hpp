@@ -35,8 +35,6 @@ struct TrajectoryFrame {
   double begin_timestamp = 0.0;
   double end_timestamp = 1.0;
 
-  // Eigen::Matrix4d begin_T_ms = Eigen::Matrix4d::Identity();
-  // Eigen::Matrix4d end_T_ms = Eigen::Matrix4d::Identity();
   Eigen::Matrix3d begin_R = Eigen::Matrix3d::Identity();
   Eigen::Vector3d begin_t = Eigen::Vector3d::Zero();
   Eigen::Matrix3d end_R = Eigen::Matrix3d::Identity();
