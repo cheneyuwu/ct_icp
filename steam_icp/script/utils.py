@@ -66,8 +66,9 @@ def get_stats(err, lengths):
     t_err /= float(len(err))
     r_err /= float(len(err))
 
-    return t_err * 100, r_err * 180 / np.pi, [a/float(b) * 100 for a, b in zip(t_err_len, len_count)], \
-        [a/float(b) * 180 / np.pi for a, b in zip(r_err_len, len_count)]
+    return t_err * 100, r_err * 180 / np.pi, \
+        [a/float(b) * 100 for a, b in zip(t_err_len, len_count) if b != 0], \
+        [a/float(b) * 180 / np.pi for a, b in zip(r_err_len, len_count) if b != 0]
 
 
 def calc_sequence_errors(poses_gt, poses_pred, dim=3):
@@ -92,7 +93,26 @@ def calc_sequence_errors(poses_gt, poses_pred, dim=3):
     return err, lengths
 
 
-def evaluate_odometry(gt_poses, pred_poses):
+def evaluate_odometry_rpe(poses_gt, poses_pred):
+    assert len(poses_gt) == len(poses_pred)
+
+    pose_errors = []
+    for i in range(1, len(poses_gt)):
+        pose_delta_gt = get_inverse_tf(poses_gt[i - 1]) @ poses_gt[i]
+        pose_delta_res = get_inverse_tf(poses_pred[i - 1]) @ poses_pred[i]
+        pose_error = get_inverse_tf(pose_delta_res) @ pose_delta_gt
+        pose_errors.append(pose_error)
+
+    t_err_2d = np.sqrt(np.mean(np.array([translation_error(e, 2) for e in pose_errors]) ** 2))
+    r_err_2d = np.mean(np.array([rotation_error(e, 2) * 180.0 / np.pi for e in pose_errors]))
+    t_err = np.sqrt(np.mean(np.array([translation_error(e, 3) for e in pose_errors]) ** 2))
+    r_err = np.mean(np.array([rotation_error(e, 3) * 180.0 / np.pi for e in pose_errors]))
+    return t_err_2d, r_err_2d, t_err, r_err
+
+
+def evaluate_odometry_kitti(gt_poses, pred_poses):
+    assert len(gt_poses) == len(pred_poses)
+
     err, path_lengths = calc_sequence_errors(gt_poses, pred_poses, 2)
     t_err_2d, r_err_2d, _, _ = get_stats(err, path_lengths)
     err, path_lengths = calc_sequence_errors(gt_poses, pred_poses, 3)
@@ -146,10 +166,23 @@ def add_plot_velocity(ax, filename, label=None):
     ax[2, 1].plot(timestamps, w_mr_inr[:, 3+2], label=label)
 
 
-def add_legend(ax, prefix = "velocity"):
+def add_legend(ax, prefix = "velocity", xlabel='time [s]'):
     legend = [['x', 'y', 'z'], ['roll', 'pitch', 'yaw']]
     for i in range(3):
         for j in range(2):
-            ax[i, j].set_xlabel('time [s]')
+            ax[i, j].set_xlabel(xlabel)
             ax[i, j].set_ylabel(prefix + ' ' + legend[j][i])
             ax[i, j].legend()
+
+
+def plot_error(ax, filename, label=None):
+    error = np.loadtxt(filename)
+    error = error[:, 2:8]  # n by 6
+    # error = np.abs(error)
+    print("Average error:", np.mean(error, axis=0), "Average abs error:", np.mean(np.abs(error), axis=0))
+    ax[0, 0].plot(error[:, 0], label=label)
+    ax[1, 0].plot(error[:, 1], label=label)
+    ax[2, 0].plot(error[:, 2], label=label)
+    ax[0, 1].plot(error[:, 3+0], label=label)
+    ax[1, 1].plot(error[:, 3+1], label=label)
+    ax[2, 1].plot(error[:, 3+2], label=label)
