@@ -395,6 +395,7 @@ steam_icp::SLAMOptions loadOptions(const rclcpp::Node::SharedPtr &node) {
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, num_threads, int);
 
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, delay_adding_points, int);
+      ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, use_final_state_value, bool);
     } else if (options.odometry == "SPLINE") {
       auto &spline_icp_options = dynamic_cast<SplineOdometry::Options &>(odometry_options);
       prefix = "odometry_options.spline.";

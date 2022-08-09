@@ -49,6 +49,7 @@ class SteamOdometry2 : public Odometry {
 
     //
     int delay_adding_points = 1;
+    bool use_final_state_value = false;
   };
 
   SteamOdometry2(const Options &options);

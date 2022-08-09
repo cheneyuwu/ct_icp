@@ -196,29 +196,30 @@ SteamOdometry2::~SteamOdometry2() {
 }
 
 Trajectory SteamOdometry2::trajectory() {
-  LOG(INFO) << "Building full trajectory." << std::endl;
-  auto full_trajectory = steam::traj::const_vel::Interface::MakeShared(options_.qc_diag);
-  for (auto &var : trajectory_vars_) {
-    full_trajectory->add(var.time, var.T_rm, var.w_mr_inr);
+  if (options_.use_final_state_value) {
+    LOG(INFO) << "Building full trajectory." << std::endl;
+    auto full_trajectory = steam::traj::const_vel::Interface::MakeShared(options_.qc_diag);
+    for (auto &var : trajectory_vars_) {
+      full_trajectory->add(var.time, var.T_rm, var.w_mr_inr);
+    }
+
+    LOG(INFO) << "Updating trajectory." << std::endl;
+    using namespace steam::se3;
+    using namespace steam::traj;
+    for (auto &frame : trajectory_) {
+      Time begin_steam_time(frame.begin_timestamp);
+      const auto begin_T_mr = inverse(full_trajectory->getPoseInterpolator(begin_steam_time))->evaluate().matrix();
+      const auto begin_T_ms = begin_T_mr * options_.T_sr.inverse();
+      frame.begin_R = begin_T_ms.block<3, 3>(0, 0);
+      frame.begin_t = begin_T_ms.block<3, 1>(0, 3);
+
+      Time end_steam_time(frame.end_timestamp);
+      const auto end_T_mr = inverse(full_trajectory->getPoseInterpolator(end_steam_time))->evaluate().matrix();
+      const auto end_T_ms = end_T_mr * options_.T_sr.inverse();
+      frame.end_R = end_T_ms.block<3, 3>(0, 0);
+      frame.end_t = end_T_ms.block<3, 1>(0, 3);
+    }
   }
-
-  LOG(INFO) << "Updating trajectory." << std::endl;
-  using namespace steam::se3;
-  using namespace steam::traj;
-  for (auto &frame : trajectory_) {
-    Time begin_steam_time(frame.begin_timestamp);
-    const auto begin_T_mr = inverse(full_trajectory->getPoseInterpolator(begin_steam_time))->evaluate().matrix();
-    const auto begin_T_ms = begin_T_mr * options_.T_sr.inverse();
-    frame.begin_R = begin_T_ms.block<3, 3>(0, 0);
-    frame.begin_t = begin_T_ms.block<3, 1>(0, 3);
-
-    Time end_steam_time(frame.end_timestamp);
-    const auto end_T_mr = inverse(full_trajectory->getPoseInterpolator(end_steam_time))->evaluate().matrix();
-    const auto end_T_ms = end_T_mr * options_.T_sr.inverse();
-    frame.end_R = end_T_ms.block<3, 3>(0, 0);
-    frame.end_t = end_T_ms.block<3, 1>(0, 3);
-  }
-
   return trajectory_;
 }
 

@@ -79,3 +79,5 @@
         num_threads: 10
 
         delay_adding_points: 4
+        use_final_state_value: false
+
