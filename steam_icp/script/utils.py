@@ -49,6 +49,21 @@ def last_frame_from_segment_length(dist, first_frame, length):
     return -1
 
 
+def get_avg_stats(errs):
+    t_err = 0
+    r_err = 0
+    num = 0
+    for err in errs:
+        num += len(err)
+        for e in err:
+            t_err += e[2]
+            r_err += e[1]
+    t_err /= float(num)
+    r_err /= float(num)
+
+    return t_err * 100, r_err * 180 / np.pi
+
+
 def get_stats(err, lengths):
     t_err = 0
     r_err = 0
@@ -92,6 +107,11 @@ def calc_sequence_errors(poses_gt, poses_pred, dim=3):
             err.append([first_frame, r_err/float(length), t_err/float(length), length])
     return err, lengths
 
+def get_avg_rpe(pose_errors):
+    t_err = np.sqrt(np.mean(np.array([translation_error(e, 3) for e in pose_errors]) ** 2))
+    r_err = np.mean(np.array([rotation_error(e, 3) * 180.0 / np.pi for e in pose_errors]))
+    return t_err, r_err
+
 
 def evaluate_odometry_rpe(poses_gt, poses_pred):
     assert len(poses_gt) == len(poses_pred)
@@ -107,17 +127,17 @@ def evaluate_odometry_rpe(poses_gt, poses_pred):
     r_err_2d = np.mean(np.array([rotation_error(e, 2) * 180.0 / np.pi for e in pose_errors]))
     t_err = np.sqrt(np.mean(np.array([translation_error(e, 3) for e in pose_errors]) ** 2))
     r_err = np.mean(np.array([rotation_error(e, 3) * 180.0 / np.pi for e in pose_errors]))
-    return t_err_2d, r_err_2d, t_err, r_err
+    return t_err_2d, r_err_2d, t_err, r_err, pose_errors
 
 
 def evaluate_odometry_kitti(gt_poses, pred_poses):
     assert len(gt_poses) == len(pred_poses)
 
-    err, path_lengths = calc_sequence_errors(gt_poses, pred_poses, 2)
-    t_err_2d, r_err_2d, _, _ = get_stats(err, path_lengths)
-    err, path_lengths = calc_sequence_errors(gt_poses, pred_poses, 3)
-    t_err, r_err, _, _ = get_stats(err, path_lengths)
-    return t_err_2d, r_err_2d, t_err, r_err
+    err_2d, path_lengths = calc_sequence_errors(gt_poses, pred_poses, 2)
+    t_err_2d, r_err_2d, _, _ = get_stats(err_2d, path_lengths)
+    err_3d, path_lengths = calc_sequence_errors(gt_poses, pred_poses, 3)
+    t_err, r_err, _, _ = get_stats(err_3d, path_lengths)
+    return t_err_2d, r_err_2d, t_err, r_err, err_3d
 
 
 def align_path(T_mr_gt, T_mr_pred):
