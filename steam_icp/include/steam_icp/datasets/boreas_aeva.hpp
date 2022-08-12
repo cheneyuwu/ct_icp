@@ -63,7 +63,7 @@ class BoreasAevaDataset : public Dataset {
       // "boreas-2022-05-18-17-23",  // cocksfield
       // new sequences with beam id
       // "boreas-2022-07-19-15-52",  // for debugging only (static)
-      "boreas-2022-07-19-16-06",  // Near utias
+      // "boreas-2022-07-19-16-06",  // Near utias
       "boreas-2022-08-05-12-59",  // Highway 7
       "boreas-2022-08-05-13-30",  // Highway 404
       "boreas-2022-08-05-13-54",  // Don Valley Parkway

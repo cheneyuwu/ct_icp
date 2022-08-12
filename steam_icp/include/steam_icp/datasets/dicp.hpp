@@ -50,11 +50,11 @@ class DICPDataset : public Dataset {
 
  private:
   static inline std::vector<std::string> SEQUENCES{
-      "brisbane-lagoon-freeway",  //
       "bunker-road",              //
       "bunker-road-vehicles",     //
       "robin-williams-tunnel",    //
-      "san-francisco-city",       //
+      "brisbane-lagoon-freeway",  //
+      // "san-francisco-city",       //
   };
 
   STEAM_ICP_REGISTER_DATASET("DICP", DICPDataset);

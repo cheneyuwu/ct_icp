@@ -206,3 +206,15 @@ def plot_error(ax, filename, label=None):
     ax[0, 1].plot(error[:, 3+0], label=label)
     ax[1, 1].plot(error[:, 3+1], label=label)
     ax[2, 1].plot(error[:, 3+2], label=label)
+
+def plot_rte_tran_error(ax, filename, label=None):
+    error = np.loadtxt(filename)
+    error = error[:, 2:8]  # n by 6
+    # error = np.abs(error)
+    print("Average error:", np.mean(error, axis=0), "Average abs error:", np.mean(np.abs(error), axis=0))
+    ax[0, 0].plot(error[:, 0], label=label)
+    ax[1, 0].plot(error[:, 1], label=label)
+    ax[2, 0].plot(error[:, 2], label=label)
+    ax[0, 1].plot(error[:, 3+0], label=label)
+    ax[1, 1].plot(error[:, 3+1], label=label)
+    ax[2, 1].plot(error[:, 3+2], label=label)
