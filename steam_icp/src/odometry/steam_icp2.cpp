@@ -754,7 +754,6 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
           return nullptr;
         }();
 
-
         const auto cost = WeightedLeastSqCostTerm<1>::MakeShared(error_func, noise_model, loss_func);
 
 #pragma omp critical(odometry_cost_term)
@@ -831,7 +830,7 @@ bool SteamOdometry2::icp(int index_frame, std::vector<Point3D> &keypoints) {
     LOG(INFO) << "number of cost terms: " << sliding_window_filter_->getNumberOfCostTerms() << std::endl;
     if (sliding_window_filter_->getNumberOfVariables() > 100)
       throw std::runtime_error{"too many variables in the filter!"};
-    if (sliding_window_filter_->getNumberOfCostTerms() > 50000)
+    if (sliding_window_filter_->getNumberOfCostTerms() > 100000)
       throw std::runtime_error{"too many cost terms in the filter!"};
 
     GaussNewtonSolver::Params params;
