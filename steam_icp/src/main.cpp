@@ -387,6 +387,21 @@ steam_icp::SLAMOptions loadOptions(const rclcpp::Node::SharedPtr &node) {
 
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, use_rv, bool);
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, merge_p2p_rv, bool);
+      std::string rv_loss_func;
+      ROS2_PARAM(node, rv_loss_func, prefix, rv_loss_func, std::string);
+      if (rv_loss_func == "L2")
+        steam_icp_options.rv_loss_func = SteamOdometry2::STEAM_LOSS_FUNC::L2;
+      else if (rv_loss_func == "DCS")
+        steam_icp_options.rv_loss_func = SteamOdometry2::STEAM_LOSS_FUNC::DCS;
+      else if (rv_loss_func == "CAUCHY")
+        steam_icp_options.rv_loss_func = SteamOdometry2::STEAM_LOSS_FUNC::CAUCHY;
+      else if (rv_loss_func == "GM")
+        steam_icp_options.rv_loss_func = SteamOdometry2::STEAM_LOSS_FUNC::GM;
+      else {
+        LOG(WARNING) << "Parameter " << prefix + "rv_loss_func"
+                     << " not specified. Using default value: "
+                     << "GM";
+      }
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, rv_cov_inv, double);
       ROS2_PARAM_CLAUSE(node, steam_icp_options, prefix, rv_loss_threshold, double);
 

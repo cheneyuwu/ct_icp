@@ -71,6 +71,7 @@
 
         use_rv: false
         merge_p2p_rv: false
+        rv_loss_func: GM # Options: [L2, DCS, CAUCHY, GM]
         rv_cov_inv: 0.1
         rv_loss_threshold: 0.05
 
@@ -80,4 +81,3 @@
 
         delay_adding_points: 4
         use_final_state_value: false
-
